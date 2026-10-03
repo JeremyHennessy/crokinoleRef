@@ -38,6 +38,7 @@ jobs:
           path: |
             test-results/*.json
             test-results/*.png
+            test-results/preroll-*.webm
           if-no-files-found: ignore
           retention-days: 7
   deploy:

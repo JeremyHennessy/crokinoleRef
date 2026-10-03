@@ -3,6 +3,7 @@ import { CalibrationGuide } from './calibration-guide.js';
 import { projectPoint, samplingMatrix } from './perspective.js';
 import { autoCalibrateFrame, scaleAutoProjectionToSource } from './auto-calibration.js';
 import { scoreSettledBoard } from './auto-referee.js';
+import { RollingClipBuffer, createCapture } from './clip-buffer.js';
 const $ = id => document.getElementById(id);
 const board = $('board'), ctx = board.getContext('2d');
 const video = $('source-video'), raw = document.createElement('canvas'), rawCtx = raw.getContext('2d', { willReadFrequently: true });
@@ -11,6 +12,27 @@ const smart = document.createElement('canvas'), smartCtx = smart.getContext('2d'
 const MB = 1024 * 1024, MAX_CLIP = 64 * MB, MAX_TOTAL = 256 * MB, MAX_CLIPS = 30;
 let previewMatch = null;
 const state = { mode: 'idle', token: 0, generation: 0, stream: null, sourceURL: null, callback: null, raf: null, calibration: null, projection: null, background: null, colors: [null, null], discs: [], contacts: [], calibrationPoints: null, sampleTeam: null, smartBusy: false, inflight: false, time: 0, lastTime: null, gaps: [], observed: 0, analysed: 0, statStart: performance.now(), fps: 0, analysisFps: 0, clips: [], selected: null, recording: null, settings: {}, names: ['Team A', 'Team B'], scores: [0, 0], totals: [0, 0], rounds: [], undo: [], round: 1, demoStart: 0, auto: { twenties: [0, 0], adjustments: [0, 0], reviewHold: false, awaitingClear: false, shotCount: 0, activeShotNumber: null, lastResult: null, lastLiveScore: null, stopTimer: null } };
+const clipBuffer = new RollingClipBuffer({
+  sourceTime: () => Number.isFinite(video.currentTime) ? video.currentTime : state.time,
+  onStatus: status => {
+    const label = $('buffer-status');
+    if (!label) return;
+    label.textContent = status.failure ? 'Pre-shot buffer unavailable · motion-triggered clips still enabled'
+      : !status.running ? 'Pre-shot buffer off'
+      : status.ready ? `Pre-shot buffer ready · about ${status.seconds.toFixed(1)} s retained locally`
+      : 'Pre-shot buffer warming up · early shots have a shorter lead-in';
+    label.dataset.ready = String(!!status.ready);
+  },
+  onError: message => notify(`Pre-shot buffering stopped: ${message}. Automatic clips can still start on motion; manual recording is unchanged.`, true)
+});
+function syncClipBuffer() {
+  const enabled = state.mode === 'camera' && state.stream?.active && readyToTrack() && !document.hidden
+    && !state.calibrationPoints && state.sampleTeam === null && !state.smartBusy
+    && $('auto-clips').checked && $('pre-roll').checked && !(state.recording && !state.recording.auto)
+    && canAddClip(0, true);
+  if (!enabled) { if (clipBuffer.running) clipBuffer.stop(); }
+  else if (!clipBuffer.running && !clipBuffer.failure) clipBuffer.start(state.stream);
+}
 const guide = new CalibrationGuide({
   getFrame: () => { if (['camera', 'file'].includes(state.mode) && video.readyState >= 2) rawCtx.drawImage(video, 0, 0, raw.width, raw.height); return raw; },
   onOpen: () => { state.calibrationPoints = []; state.sampleTeam = null; $('stage').classList.remove('calibrating'); updateControls(); },
@@ -28,7 +50,7 @@ try {
   worker.onmessage = ({ data: m }) => {
     if (m.generation !== state.generation) return;
     state.inflight = false;
-    if (m.type === 'error') { notify(`Tracking stopped: ${m.message}. Recording and manual scoring remain available.`, true); worker.terminate(); worker = null; return; }
+    if (m.type === 'error') { notify(`Tracking stopped: ${m.message}. Recording and manual scoring remain available.`, true); worker.terminate(); worker = null; clipBuffer.stop(); return; }
     state.analysed++; state.discs = m.discs;
     $('disc-count').textContent = String(m.discs.length);
     for (const event of m.contacts) {
@@ -41,7 +63,7 @@ try {
     }
     if (m.auto) handleAutoUpdate(m.auto);
   };
-  worker.onerror = () => { state.inflight = false; worker?.terminate(); worker = null; notify('Vision worker unavailable. Camera, replay and manual scoring can still be used.', true); };
+  worker.onerror = () => { state.inflight = false; worker?.terminate(); worker = null; clipBuffer.stop(); notify('Vision worker unavailable. Camera, replay and manual scoring can still be used.', true); };
 } catch { notify('This browser cannot start the tracking worker. Recording and manual scoring remain available.', true); }
 function notify(message, error = false) { $('notice').textContent = message; $('notice').classList.toggle('error', error); }
 function configSnapshot() { return { calibration: state.calibration, projection: state.projection, analysisCoordinates: state.projection ? 'rectified-board-plane-640' : 'scaled-camera-image', colors: state.colors, tolerance: +$('tolerance').value, source: state.mode, cameraReports: state.settings, version: VERSION }; }
@@ -51,6 +73,7 @@ function analysisCalibration() {
   return state.projection ? state.calibration : scaleCalibration(state.calibration, small.width / board.width);
 }
 function configureWorker() {
+  clipBuffer.stop(); // Never keep lead-in footage from a different calibration/source generation.
   state.auto.activeShotNumber=null;
   state.auto.lastLiveScore=null;
   $('apply-reviewed-score').disabled=true;
@@ -74,7 +97,8 @@ function updateControls() {
   $('tracking-status').textContent = !worker ? 'Tracking unavailable in this browser' : readyToTrack() ? 'Continuous puck tracking ready · analysing delivered frames' : !state.calibration ? 'Waiting for calibration' : !state.background ? 'Next: save an empty board' : 'Next: sample both team colours';
   $('calibration-status').textContent = state.calibration ? `${Number.isFinite(state.projection?.autoConfidence) ? `Smart fit ${Math.round(state.projection.autoConfidence * 100)}%` : state.projection ? 'Perspective fit' : state.mode === 'demo' ? 'Demo geometry' : 'Overhead fit'} · ${Math.round(state.calibration.discRadius * 2)} px puck diameter${state.projection ? ' in corrected view' : ''}` : state.smartBusy ? 'Finding board automatically…' : 'Not calibrated';
   $('file-controls').hidden = state.mode === 'file' ? false : true;
-  $('record-hint').textContent = state.mode === 'demo' ? 'Demo is synthetic. Connect a camera to record real evidence.' : !window.MediaRecorder ? 'Recording is unavailable in this browser. You can still import clips.' : $('auto-clips')?.checked ? 'Auto clips start when puck motion is detected and stop after the board settles. Manual record remains available.' : 'Manual clip mode: start before shooting. Clips stop after 30 seconds.';
+  $('record-hint').textContent = state.mode === 'demo' ? 'Demo is synthetic. Connect a camera to record real evidence.' : !window.MediaRecorder ? 'Recording is unavailable in this browser. You can still import clips.' : $('auto-clips')?.checked ? ($('pre-roll').checked ? 'Auto clips retain the pre-shot lead-in once warmed up, then finish after settlement. Buffer status is in setup.' : 'Auto clips start on detected motion; pre-shot buffering is off.') : 'Manual clip mode: start before shooting. Clips stop after 30 seconds.';
+  syncClipBuffer();
 }
 function resetStats() { state.lastTime = null; state.time = 0; state.gaps = []; state.observed = state.analysed = 0; state.fps = state.analysisFps = 0; state.statStart = performance.now(); $('observed-fps').textContent = '—'; $('frame-gap').textContent = '—'; }
 function resetAutoRound() {
@@ -155,6 +179,7 @@ function exitPreview() {
 }
 function stopSource() {
   if (state.recording) { notify('Finish the current clip before changing the camera or source.', true); return false; }
+  clipBuffer.stop(); clipBuffer.failure = null;
   guide.cancel();
   exitPreview();
   state.token++;
@@ -367,40 +392,68 @@ function addClip(blob, details) {
 function startClip(options = {}) {
   const auto = !!options.auto, shotNumber = Number.isInteger(options.shotNumber) ? options.shotNumber : null;
   if (state.mode !== 'camera' || !state.stream || state.recording || !window.MediaRecorder || !canAddClip(0)) return false;
-  const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'].find(m => MediaRecorder.isTypeSupported(m));
+  let capture;
   try {
-    const recorder = new MediaRecorder(state.stream, { ...(mime ? { mimeType: mime } : {}), videoBitsPerSecond: 6000000 });
-    const record = { recorder, chunks: [], bytes: 0, started: performance.now(), sourceStart: state.time, contacts: [], trackingGaps: 0, snapshot: configSnapshot(), round:state.round, epoch:state.generation, resolve: null, auto, shotNumber, autoResult: null };
+    if (auto && $('pre-roll').checked) capture = clipBuffer.take();
+    if (!capture) {
+      // Manual clips and unsupported/warming-up buffering retain the original
+      // motion-triggered recording fallback, with honest zero pre-roll metadata.
+      if (!auto) clipBuffer.stop();
+      capture = createCapture(state.stream, { sourceTime: () => video.currentTime });
+      capture.claimed = true;
+      capture.preRollState = auto && $('pre-roll').checked ? 'unavailable' : 'off';
+      capture.preRollRequestedSeconds = auto && $('pre-roll').checked ? 2 : 0;
+      capture.triggerSourceTime = video.currentTime;
+    }
+    capture.maxBytes = Math.min(MAX_CLIP, MAX_TOTAL - state.clips.reduce((n,c) => n + c.blob.size, 0));
+    if (capture.bytes > capture.maxBytes) { capture.discard(); notify('Not enough clip storage for the pre-shot buffer. Export and remove existing clips.', true); return false; }
+    const record = Object.assign(capture, {
+      contacts: state.contacts.filter(e => e.to >= capture.sourceStart), trackingGaps: 0,
+      snapshot: configSnapshot(), round: state.round, epoch: state.generation,
+      auto, shotNumber, autoResult: null
+    });
     state.recording = record;
-    record.done = new Promise(resolve => { record.resolve = resolve; });
-    recorder.ondataavailable = e => { if (e.data.size) { record.chunks.push(e.data); record.bytes += e.data.size; if ((record.bytes > MAX_CLIP || state.clips.reduce((n,c)=>n+c.blob.size,0)+record.bytes>MAX_TOTAL) && recorder.state !== 'inactive') {record.error=true;recorder.stop();} } };
-    recorder.onerror = () => { record.error = true; notify('The browser reported a recording error. Any partial clip will be labelled incomplete.', true); if (recorder.state !== 'inactive') recorder.stop(); };
-    recorder.onstop = () => {
-      clearTimeout(record.timer); const duration = (performance.now() - record.started) / 1000;
-      const blob = new Blob(record.chunks, { type: recorder.mimeType || mime || 'video/webm' });
+    record.done = capture.finished.then(() => {
+      clearTimeout(record.timer);
+      const duration = Math.max(0, (record.stoppedAt - record.started) / 1000);
+      const blob = new Blob(record.chunks, { type: record.recorder.mimeType || record.mime || 'video/webm' });
       const title = record.auto ? `Shot ${record.shotNumber ?? '?'} · Auto` : `Shot ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
       const added = blob.size && addClip(blob, {
-        title, round:record.round, source: record.auto ? 'camera-auto' : 'camera', duration, complete: !record.error && (!record.auto || !!record.autoResult), preRollSeconds:0,
+        title, round: record.round, source: record.auto ? 'camera-auto' : 'camera', duration,
+        complete: !record.error && (!record.auto || !!record.autoResult),
+        preRollSeconds: record.preRollSeconds, preRollRequestedSeconds: record.preRollRequestedSeconds,
+        preRollState: record.preRollState, recordingError: record.errorMessage,
         contacts: record.contacts.map(e => ({ ...e, from: Math.max(0, e.from - record.sourceStart), to: Math.max(0, e.to - record.sourceStart) })),
         trackingGaps: record.trackingGaps, configuration: record.snapshot,
-        timing: { observedFps: state.fps, analysedFps: state.analysisFps, maxObservedGapMs: state.gaps.length ? Math.max(...state.gaps) * 1000 : null },
+        timing: { observedFps: state.fps, analysedFps: state.analysisFps,
+          maxObservedGapMs: state.gaps.length ? Math.max(...state.gaps) * 1000 : null,
+          sourceStart: record.sourceStart, triggerSourceTime: record.triggerSourceTime,
+          origin: 'approximate source presentation time; not sensor time',
+          preRollMethod: record.preRollSeconds > 0 ? 'complete-overlapping-recorder-session' : 'none' },
         autoResult: record.autoResult, autoTriggered: record.auto, shotNumber: record.shotNumber
       });
-      state.recording = null; updateControls(); record.resolve();
-      if (added && !record.auto) notify(record.error ? 'An incomplete clip was retained. Review and export it; do not rely on it for a verdict.' : 'Clip retained in this tab. Open Review to replay it or export the original video.', !!record.error);
+      record.chunks = []; // Blob now owns the saved bytes; drop session references.
+      if (state.recording === record) state.recording = null;
+      updateControls();
+      if (added && record.error) notify('An incomplete clip was retained. Review it before relying on the footage.', true);
+      else if (added && !record.auto) notify('Clip retained in this tab. Open Review to replay it or export the original video.');
       else if (!blob.size) notify('The recording contained no video data. Please try another capture mode.', true);
-    };
-    recorder.start(250); record.timer = setTimeout(() => {record.error=true;if(state.recording===record)finishClip();}, auto ? 15000 : 30000); updateControls();
-    if (auto) { if ($('auto-status')) $('auto-status').textContent = `Shot ${shotNumber} detected · clip recording automatically`; }
+    });
+    record.timer = setTimeout(() => { record.error = true; record.errorMessage ||= 'Clip time limit reached'; if (state.recording === record) finishClip(); }, auto ? 15000 : 30000);
+    updateControls();
+    if (auto) $('auto-status').textContent = `Shot ${shotNumber} detected · recording with ${record.preRollSeconds.toFixed(1)} s estimated lead-in`;
     else notify('Recording now. Take the shot, then press Finish clip. No automatic legal/foul verdict will be applied.');
     return true;
-  } catch (error) { state.recording = null; updateControls(); notify(`Recording could not start: ${error.message}`, true); return false; }
+  } catch (error) {
+    capture?.discard(); state.recording = null; updateControls();
+    notify(`Recording could not start: ${error.message}`, true); return false;
+  }
 }
 function finishClip() {
   const r = state.recording; if (!r) return Promise.resolve();
   if(r.auto&&!r.autoResult)r.error=true;
   $('stop-record').disabled = true;
-  if (r.recorder.state !== 'inactive') r.recorder.stop();
+  r.stop();
   return r.done.finally(() => { $('stop-record').disabled = false; });
 }
 async function importVideo(file) {
@@ -425,12 +478,12 @@ function renderClips() {
   for (const c of state.clips) {
     const card = document.createElement('div'); card.className = 'clip';
     const info = document.createElement('div'), title = document.createElement('strong'), sub = document.createElement('p');
-    title.textContent = c.title; sub.textContent = `${c.duration === null ? 'Duration unknown' : formatTime(c.duration)} · ${(c.blob.size / MB).toFixed(1)} MB${c.autoTriggered ? ' · AUTO CLIP' : ''}${c.autoResult?.score ? ` · score ${c.autoResult.score.totals.join('–')}` : ''} · ${c.verdict}${c.complete === false ? ' · INCOMPLETE' : ''}`;
+    title.textContent = c.title; sub.textContent = `${c.duration === null ? 'Duration unknown' : formatTime(c.duration)} · ${(c.blob.size / MB).toFixed(1)} MB${c.autoTriggered ? ' · AUTO CLIP' : ''}${c.preRollSeconds > 0 ? ` · ~${c.preRollSeconds.toFixed(1)}s lead-in` : ''}${c.autoResult?.score ? ` · score ${c.autoResult.score.totals.join('–')}` : ''} · ${c.verdict}${c.complete === false ? ' · INCOMPLETE' : ''}`;
     info.append(title, sub); const actions = document.createElement('div'); actions.className = 'clip-actions';
     const review = document.createElement('button'); review.textContent = 'Review'; review.className = 'secondary'; review.onclick = () => openReplay(c.id);
     const remove = document.createElement('button'); remove.textContent = '×'; remove.className = 'text-button'; remove.setAttribute('aria-label', `Remove ${c.title}`); remove.onclick = () => {
       if (!confirm('Remove this clip from the tab? Export its video first to keep it.')) return;
-      URL.revokeObjectURL(c.url); state.clips = state.clips.filter(v => v.id !== c.id); renderClips();
+      URL.revokeObjectURL(c.url); state.clips = state.clips.filter(v => v.id !== c.id); renderClips(); updateControls();
     };
     actions.append(review, remove); card.append(info, actions); $('clips').append(card);
   }
@@ -441,6 +494,7 @@ function openReplay(id) {
   $('verdict').value = c.verdict; $('review-note').value = c.note;
   $('replay-events').replaceChildren();
   const intro = document.createElement('p'); intro.textContent = c.source === 'import' ? 'Imported video. No persisted automatic contact analysis.' : `${c.contacts.length} proximity candidate(s); ${c.trackingGaps || 0} tracking discontinuity/initialisation frame(s). Times are approximate relative to recording start. Candidates within one interval have unresolved order.`; $('replay-events').append(intro);
+  if (c.autoTriggered) { const p = document.createElement('p'); p.textContent = `Pre-shot lead-in: approximately ${(c.preRollSeconds || 0).toFixed(1)} s (${c.preRollState || 'off'}). Event times include that lead-in and are not sensor timestamps.`; $('replay-events').append(p); }
   if (c.autoResult?.score) { const p = document.createElement('p'); p.textContent = `Auto score after settlement: ${c.autoResult.score.totals[0]}–${c.autoResult.score.totals[1]} · ${c.autoResult.scoreApplied ? 'applied' : 'held for review'}${c.autoResult.score.review ? ' · line/centre review suggested' : ''}. This is scoring assistance, not an automatic legal/foul verdict.`; $('replay-events').append(p); }
   for (const e of c.contacts) { const p = document.createElement('p'); p.textContent = `${e.from.toFixed(3)}–${e.to.toFixed(3)} s · ${e.teams[0] === 0 ? 'A' : 'B'}${e.ids[0]} ↔ ${e.teams[1] === 0 ? 'A' : 'B'}${e.ids[1]} · proximity only, not a proven collision`; $('replay-events').append(p); }
   $('replay-dialog').showModal();
@@ -496,7 +550,8 @@ $('apply-reviewed-score').onclick=()=>{
   snapshotScore();state.auto.reviewHold=false;state.scores=[...score.totals];saveMatch();renderScore();
   $('auto-status').textContent='Reviewed board score applied by player; automatic scoring may resume.';
 };
-$('auto-clips').onchange = () => {if(!$('auto-clips').checked&&state.recording?.auto)finishClip();updateControls();};
+$('auto-clips').onchange = () => {if(!$('auto-clips').checked&&state.recording?.auto)finishClip();clipBuffer.failure=null;updateControls();};
+$('pre-roll').onchange = () => {clipBuffer.failure=null;syncClipBuffer();updateControls();};
 $('import-button').onclick = () => $('import-video').click();
 $('import-video').onchange = e => { const file = e.target.files[0]; e.target.value = ''; importVideo(file); };
 $('file-play').onclick = () => video.paused ? video.play().catch(e => notify(e.message, true)) : video.pause();
@@ -521,5 +576,5 @@ $('score-mode').onchange = saveMatch;
 $('new-match').onclick = () => { if(state.recording||state.auto.activeShotNumber!==null)return notify('Finish the current shot first.',true); if (!confirm('Start a new match? Scores and round history will reset. Clips remain in this tab.')) return; snapshotScore(); state.scores = [0, 0]; state.totals = [0, 0]; state.rounds = []; state.round = 1; resetAutoRound(); saveMatch(); renderScore(); };
 document.addEventListener('visibilitychange', () => { if (document.hidden && state.recording) { state.recording.trackingGaps++; notify('Tab hidden: tracking may pause. Recording may continue, but contact evidence can be incomplete.', true); } resetStats(); configureWorker(); });
 window.addEventListener('beforeunload', e => { if (state.clips.length || state.recording) { e.preventDefault(); e.returnValue = ''; } });
-window.addEventListener('pagehide', () => { state.stream?.getTracks().forEach(t => t.stop()); });
+window.addEventListener('pagehide', () => { clipBuffer.stop(); state.stream?.getTracks().forEach(t => t.stop()); });
 loadMatch(); renderScore(); updateControls(); listCameras();

@@ -1,4 +1,15 @@
-# Current project handoff — 2026-10-03
+# Current handoff — pre-shot buffering
+
+Current recording baseline: deployed `3afc3d757c99cb05e0957662c0a0348f95b46fdb` (PR #6). Pre-roll work is on `feature/buffered-shot-clips`. See `docs/BUFFERING.md` for the design, limits and release gates. Do not confuse a branch or a documentation statement with a verified Pages deployment.
+
+Keep the existing board UI and all scoring/calibration/tracking code unchanged for this recording change. Add only the pre-shot option, buffer status and clip lead-in metadata. Complete overlapping recording sessions preserve the container header; do not concatenate arbitrary video chunks. Actual pixel-decoded pre-flick frames are required in browser evidence.
+
+Real webcam video was not found in this conversation or Library. Physical Logitech performance, occlusion, disc contacts and 20s remain unverified. Request a recording for that test; do not treat synthetic camera or still-image success as real-game validation. Never commit room footage publicly without specific permission.
+
+The source transport workflow is branch-only and is removed before release. Run the full Node and browser suites, inspect recorded proof/screenshots, compare the exact release tree and verify Pages build-info. No opportunistic scoring changes, UI redesign, dependency changes or automatic legal/foul decisions.
+
+## Earlier automation review (historical)
+
 
 ## Scope and preservation
 

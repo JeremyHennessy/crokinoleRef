@@ -51,7 +51,9 @@ With **Auto scoring** enabled, the tracker watches for meaningful puck movement,
 
 A tracked puck approaching the centre and then disappearing is a **possible 20**, not a confirmed one. The shot is flagged for review and the score is held. Verify the replay/board, use that team's **+20** button for a real 20, and then press **Use reviewed board score**. Confirmed 20s are banked separately from visible pucks and survive later automatic updates. A hidden or lost puck is never automatically converted into a 20.
 
-With **Auto clips** enabled on a live camera, recording starts when the shot detector sees puck motion and stops shortly after the board settles. This reuses the same browser MediaRecorder path as manual clips. It does **not** yet include true pre-roll, so the first movement frame may precede the recorded clip by a small detection/recorder delay. Manual recording remains available.
+With **Auto clips** and **Include pre-shot footage** enabled, the app keeps a small rolling video buffer locally once tracking is ready. Wait for **Pre-shot buffer ready** before the first shot. When motion is detected, a recording that was already running is retained and continues through settlement. Its nominal lead-in is about 2–4 seconds; the actual estimated lead-in is shown on the clip and in Review. Early shots can have a shorter lead-in. When buffering is off or unavailable, automatic clips still start on motion, with zero pre-roll clearly recorded. Manual clips remain available.
+
+Unused buffer footage is discarded, not uploaded or added to the shot library. Turning off the pre-shot option releases the idle encoders without deleting saved clips. Disconnecting, changing calibration/source, or hiding the tab discards stale idle footage. The buffer uses extra video encoding; turn off **Include pre-shot footage** if your computer cannot sustain capture and analysis. See [buffering details and test boundaries](BUFFERING.md).
 
 The scoreboard is updated only after settlement with no frame gap, unexplained obstruction, unexplained puck loss, close scoring-line call or pending 20 review. These are evidence gates, not measured accuracy percentages. Manual point buttons remain available as corrections, and Undo restores the previous score state. Finishing a round resets the tracked 20 count and automatic shot count for the next round.
 
@@ -63,7 +65,7 @@ Automatic scoring is not an automatic foul/legal-shot engine. Contact candidates
 
 ## Record and review a shot
 
-With **Auto clips** enabled, live-camera clips start from detected puck motion and stop after settlement. Manual clip controls remain available, and manual clips stop after 30 seconds. Recording also works without completed vision setup when started manually; untracked video remains useful for human replay.
+With **Auto clips** enabled, live-camera clips are retained on detected motion and stop after settlement; enabled, warmed-up buffering also includes the pre-shot lead-in. Manual clip controls remain available, and manual clips stop after 30 seconds. Recording also works without completed vision setup when started manually; untracked video remains useful for human replay.
 
 Open **Review** in the shot library. Normal, half and quarter speed are available. The +/-33 ms buttons are approximate time seeks, **not guaranteed frame stepping**. They cannot recover missing frames. Candidate contacts are listed separately; the exported video has no overlays burned in.
 
