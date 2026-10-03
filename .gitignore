@@ -1,0 +1,6 @@
+node_modules/
+__pycache__/
+test-results/
+.DS_Store
+*.webm
+*.mp4
