@@ -1,6 +1,18 @@
 import { distance, suggestedScore } from './core.js';
 
 const cloneDisc=d=>({id:d.id,team:d.team,x:d.x,y:d.y,r:d.r});
+function geometricPairs(previous,current) {
+  const candidates=[];
+  previous.forEach((p,pi)=>current.forEach((d,di)=>{if(p.team===d.team)candidates.push({p,d,pi,di,dist:distance(p,d)});}));
+  candidates.sort((a,b)=>a.dist-b.dist);
+  const usedP=new Set(),usedD=new Set(),pairs=[];
+  for(const c of candidates){
+    if(usedP.has(c.pi)||usedD.has(c.di))continue;
+    usedP.add(c.pi);usedD.add(c.di);
+    pairs.push({...c,delta:c.dist/Math.max(1,(c.p.r+c.d.r)/2)});
+  }
+  return pairs;
+}
 
 export function scoreSettledBoard(discs, calibration, twenties=[0,0]) {
   if(!calibration) return {totals:[0,0],visible:[0,0],twenties:[...twenties],items:[],review:true,reviewReasons:['No calibration']};
@@ -52,12 +64,12 @@ export class AutoShotAnalyzer {
   update(frame,time){
     const current=(frame.discs||[]).map(cloneDisc),previous=this.last;
     const prevBy=new Map(previous.map(d=>[d.id,d])),curBy=new Map(current.map(d=>[d.id,d]));
-    const matched=[];
-    for(const d of current){const p=prevBy.get(d.id);if(p)matched.push({d,p,delta:distance(d,p)/Math.max(1,(d.r+p.r)/2)});}
+    const matched=geometricPairs(previous,current);
     const maxMotion=matched.length?Math.max(...matched.map(v=>v.delta)):0;
     const moving=matched.filter(v=>v.delta>=this.options.moveStart).map(v=>v.d.id);
     const appeared=current.filter(d=>!prevBy.has(d.id)).map(d=>d.id);
     const disappeared=previous.filter(d=>!curBy.has(d.id)).map(d=>d.id);
+    const topologyAppeared=Math.max(0,current.length-matched.length),topologyDisappeared=Math.max(0,previous.length-matched.length);
     const frameGap=!!frame.frameGap;
     let event=null;
 
@@ -67,14 +79,14 @@ export class AutoShotAnalyzer {
         this.active=true;this.shotNumber++;this.startedAt=time;this.stableSince=null;this.hadFrameGap=false;this.contacts=[];
         this.tracks=new Map();const seed=this.lastSettled.length?this.lastSettled:previous;this.preDiscs=seed.map(cloneDisc);this._recordTracks(seed,time);this._recordTracks(current,time);
         event={type:'shot-start',shotNumber:this.shotNumber,time,movingDiscIds:moving,preDiscs:this.preDiscs.map(cloneDisc)};
-      } else if(!frameGap&&maxMotion<this.options.moveStop&&appeared.length===0&&disappeared.length===0) {
+      } else if(!frameGap&&maxMotion<this.options.moveStop&&topologyAppeared===0&&topologyDisappeared===0) {
         this.lastSettled=current.map(cloneDisc);
       }
     } else {
       this._recordTracks(current,time);
       if(frameGap)this.hadFrameGap=true;
       if(frame.contacts?.length)this.contacts.push(...frame.contacts);
-      const stable=!frameGap&&maxMotion<this.options.moveStop&&appeared.length===0&&disappeared.length===0;
+      const stable=!frameGap&&maxMotion<this.options.moveStop&&topologyAppeared===0&&topologyDisappeared===0;
       if(stable){if(this.stableSince===null)this.stableSince=time;}else this.stableSince=null;
       if((this.stableSince!==null&&time-this.stableSince>=this.options.settleSeconds)||time-this.startedAt>=this.options.maxShotSeconds){
         const twentyCandidates=[];
