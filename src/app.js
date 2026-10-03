@@ -61,7 +61,7 @@ function updateControls() {
   $('sample-a').disabled = !state.background || busy || calibrating; $('sample-b').disabled = !state.background || busy || calibrating;
   ['camera', 'capture-mode', 'calibration-mode', 'import-video', 'import-button', 'tolerance', 'refresh-cameras'].forEach(id => { $(id).disabled = busy || smartBusy; });
   $('demo').disabled = busy; $('cancel-calibrate').hidden = !calibrating && state.sampleTeam === null;
-  $('tracking-status').textContent = !worker ? 'Tracking unavailable in this browser' : readyToTrack() ? 'Experimental tracking active · human review required' : !state.calibration ? 'Waiting for calibration' : !state.background ? 'Next: save an empty board' : 'Next: sample both team colours';
+  $('tracking-status').textContent = !worker ? 'Tracking unavailable in this browser' : readyToTrack() ? 'Continuous puck tracking ready · watching every frame' : !state.calibration ? 'Waiting for calibration' : !state.background ? 'Next: save an empty board' : 'Next: sample both team colours';
   $('calibration-status').textContent = state.calibration ? `${Number.isFinite(state.projection?.autoConfidence) ? `Smart fit ${Math.round(state.projection.autoConfidence * 100)}%` : state.projection ? 'Perspective fit' : state.mode === 'demo' ? 'Demo geometry' : 'Overhead fit'} · ${Math.round(state.calibration.discRadius * 2)} px puck diameter${state.projection ? ' in corrected view' : ''}` : state.smartBusy ? 'Finding board automatically…' : 'Not calibrated';
   $('file-controls').hidden = state.mode !== 'file';
   $('record-hint').textContent = state.mode === 'demo' ? 'Demo is synthetic. Connect a camera to record real evidence.' : !window.MediaRecorder ? 'Recording is unavailable in this browser. You can still import clips.' : $('auto-clips')?.checked ? 'Auto clips start when puck motion is detected and stop after the board settles. Manual record remains available.' : 'Manual clip mode: start before shooting. Clips stop after 30 seconds.';
@@ -240,7 +240,7 @@ function drawOverlay() {
     ctx.strokeStyle = d.team === 0 ? '#a0ddf3' : '#f7b2a1'; ctx.lineWidth = 2 * scale;
     outline(center, r + (projection ? 3 : 3 * scale));
     ctx.font = `bold ${12 * scale}px system-ui`; ctx.fillStyle = '#fff'; ctx.strokeStyle = '#183b36'; ctx.lineWidth = 3 * scale;
-    const label = `${d.team === 0 ? 'A' : 'B'}${d.id}`; ctx.strokeText(label, edge.x + 6, p.y); ctx.fillText(label, edge.x + 6, p.y);
+    const scored = state.auto.lastLiveScore?.items?.find(v => v.id === d.id && v.team === d.team); const label = `${d.team === 0 ? 'A' : 'B'}${d.id}${scored ? ` · ${scored.value}${scored.review ? '?' : ''}` : ''}`; ctx.strokeText(label, edge.x + 6, p.y); ctx.fillText(label, edge.x + 6, p.y);
   }
   ctx.restore();
 }
