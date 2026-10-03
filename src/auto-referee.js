@@ -40,7 +40,7 @@ export class AutoShotAnalyzer {
     this.options={
       moveStart:options.moveStart??.20,
       moveStop:options.moveStop??.16,
-      settleSeconds:options.settleSeconds??.65,
+      settleSeconds:options.settleSeconds??1.0,
       maxShotSeconds:options.maxShotSeconds??10,
       twentyRadiusFactor:options.twentyRadiusFactor??1.85
     };
