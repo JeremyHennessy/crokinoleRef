@@ -27,7 +27,7 @@ Click the centre hole, the 15 line, the 10 line, the outer printed shooting line
 
 The guide does not change the active calibration while you are clicking. **Undo last click** goes back one point; **Retake image / start over** takes a fresh image; **Cancel** keeps the previous calibration. Once all points are placed, inspect the guides on your actual image and the straightened preview. They should follow the printed rings all the way around. Only press **Use this calibration** when the fit looks right. A geometry fit is not a verified referee decision.
 
-The centre hole is checked independently against the four quarter marks. Misordered, repeated, off-frame or inconsistent points are rejected. A small centre residual is only a fit diagnostic, not a guarantee of millimetre accuracy.
+The centre hole is used together with the four quarter marks in a best-fit perspective solution. This is deliberately tolerant of a small amount of manual click error and ordinary webcam lens distortion. Misordered, repeated, off-frame or grossly inconsistent points are still rejected. The displayed residual is a fit diagnostic, not a guarantee of millimetre accuracy; the coloured ring overlay remains the final calibration check.
 
 ## Teach the detector your empty board and puck colours
 
