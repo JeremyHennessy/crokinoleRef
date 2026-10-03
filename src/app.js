@@ -1,13 +1,26 @@
 import { VERSION, clamp, makeCalibration, scaleCalibration, roundResult, captureConstraints, averageColor } from './core.js';
+import { CalibrationGuide } from './calibration-guide.js';
+import { projectPoint, samplingMatrix } from './perspective.js';
 const $ = id => document.getElementById(id);
 const board = $('board'), ctx = board.getContext('2d');
 const video = $('source-video'), raw = document.createElement('canvas'), rawCtx = raw.getContext('2d', { willReadFrequently: true });
 const small = document.createElement('canvas'), smallCtx = small.getContext('2d', { willReadFrequently: true });
 const MB = 1024 * 1024, MAX_CLIP = 64 * MB, MAX_TOTAL = 128 * MB;
-const state = { mode: 'idle', token: 0, generation: 0, stream: null, sourceURL: null, callback: null, raf: null, calibration: null, background: null, colors: [null, null], discs: [], contacts: [], calibrationPoints: null, sampleTeam: null, inflight: false, time: 0, lastTime: null, gaps: [], observed: 0, analysed: 0, statStart: performance.now(), fps: 0, analysisFps: 0, clips: [], selected: null, recording: null, settings: {}, names: ['Team A', 'Team B'], scores: [0, 0], totals: [0, 0], rounds: [], undo: [], round: 1, demoStart: 0 };
+const state = { mode: 'idle', token: 0, generation: 0, stream: null, sourceURL: null, callback: null, raf: null, calibration: null, projection: null, background: null, colors: [null, null], discs: [], contacts: [], calibrationPoints: null, sampleTeam: null, inflight: false, time: 0, lastTime: null, gaps: [], observed: 0, analysed: 0, statStart: performance.now(), fps: 0, analysisFps: 0, clips: [], selected: null, recording: null, settings: {}, names: ['Team A', 'Team B'], scores: [0, 0], totals: [0, 0], rounds: [], undo: [], round: 1, demoStart: 0 };
+const guide = new CalibrationGuide({
+  getFrame: () => { if (['camera', 'file'].includes(state.mode) && video.readyState >= 2) rawCtx.drawImage(video, 0, 0, raw.width, raw.height); return raw; },
+  onOpen: () => { state.calibrationPoints = []; state.sampleTeam = null; $('stage').classList.remove('calibrating'); updateControls(); },
+  onCancel: () => { state.calibrationPoints = null; $('stage-hint').textContent = 'Calibration cancelled. The previous calibration is unchanged.'; configureWorker(); ctx.drawImage(raw, 0, 0); drawOverlay(); },
+  onApply: ({ calibration, projection }) => {
+    state.calibration = calibration; state.projection = projection; state.calibrationPoints = null; state.background = null; state.colors = [null, null];
+    $('stage-hint').textContent = 'Geometry set. Clear all pucks and hands, then save the empty board.';
+    configureWorker(); ctx.drawImage(raw, 0, 0); drawOverlay();
+    notify(projection ? 'Board-plane perspective correction applied. Clear the board for a new background. Hidden pucks, lens distortion and raised puck/peg surfaces remain limitations.' : 'Overhead calibration applied. Clear the board, save its empty view, then sample both puck colours.');
+  }
+});
 let worker;
 try {
-  worker = new Worker(new URL('./vision-worker.js', import.meta.url), { type: 'module' });
+  worker = new Worker(new URL('./vision-worker.js?calibration=2', import.meta.url), { type: 'module' });
   worker.onmessage = ({ data: m }) => {
     if (m.generation !== state.generation) return;
     state.inflight = false;
@@ -26,11 +39,11 @@ try {
   worker.onerror = () => { state.inflight = false; worker?.terminate(); worker = null; notify('Vision worker unavailable. Camera, replay and manual scoring can still be used.', true); };
 } catch { notify('This browser cannot start the tracking worker. Recording and manual scoring remain available.', true); }
 function notify(message, error = false) { $('notice').textContent = message; $('notice').classList.toggle('error', error); }
-function configSnapshot() { return { calibration: state.calibration, colors: state.colors, tolerance: +$('tolerance').value, source: state.mode, cameraReports: state.settings, version: VERSION }; }
+function configSnapshot() { return { calibration: state.calibration, projection: state.projection, analysisCoordinates: state.projection ? 'rectified-board-plane-640' : 'scaled-camera-image', colors: state.colors, tolerance: +$('tolerance').value, source: state.mode, cameraReports: state.settings, version: VERSION }; }
 function configureWorker() {
   state.generation++; state.inflight = false; state.discs = []; state.contacts = []; $('disc-count').textContent = '—';
   const scale = small.width / board.width;
-  worker?.postMessage({ type: 'configure', generation: state.generation, calibration: state.calibration ? scaleCalibration(state.calibration, scale) : null, background: state.background, colors: state.colors, tolerance: +$('tolerance').value });
+  worker?.postMessage({ type: 'configure', generation: state.generation, calibration: state.calibration ? (state.projection ? state.calibration : scaleCalibration(state.calibration, scale)) : null, warp: state.projection ? { matrix: samplingMatrix(state.projection, scale), width: small.width, height: small.height } : null, background: state.background, colors: state.colors, tolerance: +$('tolerance').value });
   $('contact-status').textContent = 'First-contact order is not verified. Proximity candidates are not referee decisions.';
   updateControls();
 }
@@ -42,16 +55,17 @@ function updateControls() {
   $('record').hidden = busy; $('stop-record').hidden = !busy; $('record-label').hidden = !busy;
   $('calibrate').disabled = !active || busy; $('background').disabled = !state.calibration || busy || calibrating;
   $('sample-a').disabled = !state.background || busy || calibrating; $('sample-b').disabled = !state.background || busy || calibrating;
-  ['camera', 'capture-mode', 'import-video', 'import-button', 'tolerance', 'refresh-cameras'].forEach(id => { $(id).disabled = busy; });
+  ['camera', 'capture-mode', 'calibration-mode', 'import-video', 'import-button', 'tolerance', 'refresh-cameras'].forEach(id => { $(id).disabled = busy; });
   $('demo').disabled = busy; $('cancel-calibrate').hidden = !calibrating && state.sampleTeam === null;
   $('tracking-status').textContent = !worker ? 'Tracking unavailable in this browser' : readyToTrack() ? 'Experimental tracking active · human review required' : !state.calibration ? 'Waiting for calibration' : !state.background ? 'Next: save an empty board' : 'Next: sample both team colours';
-  $('calibration-status').textContent = state.calibration ? `${state.mode === 'demo' ? 'Demo geometry' : 'Calibrated for this view'} · ${Math.round(state.calibration.discRadius * 2)} px disc diameter` : 'Not calibrated';
+  $('calibration-status').textContent = state.calibration ? `${state.projection ? 'Perspective fit' : state.mode === 'demo' ? 'Demo geometry' : 'Overhead fit'} · ${Math.round(state.calibration.discRadius * 2)} px puck diameter${state.projection ? ' in corrected view' : ''}` : 'Not calibrated';
   $('file-controls').hidden = state.mode !== 'file';
   $('record-hint').textContent = state.mode === 'demo' ? 'Demo is synthetic. Connect a camera to record real evidence.' : !window.MediaRecorder ? 'Recording is unavailable in this browser. You can still import clips.' : 'Start a clip before shooting. No pre-roll. Clips stop after 30 seconds.';
 }
 function resetStats() { state.lastTime = null; state.time = 0; state.gaps = []; state.observed = state.analysed = 0; state.fps = state.analysisFps = 0; state.statStart = performance.now(); $('observed-fps').textContent = '—'; $('frame-gap').textContent = '—'; }
 function stopSource() {
   if (state.recording) { notify('Finish the current clip before changing the camera or source.', true); return false; }
+  guide.cancel();
   state.token++;
   if (state.callback !== null && video.cancelVideoFrameCallback) video.cancelVideoFrameCallback(state.callback);
   if (state.raf !== null) cancelAnimationFrame(state.raf);
@@ -59,9 +73,9 @@ function stopSource() {
   state.stream?.getTracks().forEach(t => t.stop()); state.stream = null;
   video.pause(); video.srcObject = null; video.removeAttribute('src'); video.load();
   if (state.sourceURL) URL.revokeObjectURL(state.sourceURL); state.sourceURL = null;
-  state.mode = 'idle'; state.calibration = state.background = state.calibrationPoints = null; state.sampleTeam = null; state.colors = [null, null]; state.settings = {};
+  state.mode = 'idle'; state.projection = null; state.calibration = state.background = state.calibrationPoints = null; state.sampleTeam = null; state.colors = [null, null]; state.settings = {};
   $('stage').classList.remove('calibrating'); $('demo-label').hidden = true; $('welcome').hidden = false;
-  $('source-badge').textContent = 'No camera connected'; $('reported-fps').textContent = '—'; $('stage-hint').textContent = 'Mount the camera directly overhead, with the whole board in view.';
+  $('source-badge').textContent = 'No camera connected'; $('reported-fps').textContent = '—'; $('stage-hint').textContent = 'An angled camera is supported experimentally. Keep the entire scoring circle in view.';
   ctx.clearRect(0, 0, board.width, board.height); resetStats(); configureWorker(); return true;
 }
 function resize(width, height) {
@@ -147,53 +161,46 @@ function processFrame(time, now) {
 }
 function drawOverlay() {
   if (!$('overlays').checked || !state.calibration) return;
-  const c = state.calibration; ctx.save(); ctx.strokeStyle = '#faf3c69e'; ctx.lineWidth = Math.max(1, board.width / 600); ctx.setLineDash([7, 7]);
-  for (const r of c.rings) { ctx.beginPath(); ctx.arc(c.center.x, c.center.y, r, 0, Math.PI * 2); ctx.stroke(); }
-  ctx.setLineDash([]); const scale = board.width / small.width;
+  const c = state.calibration, projection = state.projection;
+  const map = p => projection ? projectPoint(projection.boardToImage, p) : p;
+  const outline = (center, radius) => {
+    ctx.beginPath();
+    if (!projection) ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+    else for (let i = 0; i <= 72; i++) { const a = i * Math.PI / 36, p = map({ x: center.x + radius * Math.cos(a), y: center.y + radius * Math.sin(a) }); if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); }
+    ctx.stroke();
+  };
+  ctx.save(); ctx.strokeStyle = '#faf3c69e'; ctx.lineWidth = Math.max(1, board.width / 600); ctx.setLineDash([7, 7]);
+  for (const radius of c.rings) outline(c.center, radius);
+  ctx.setLineDash([]); const scale = board.width / (projection ? 640 : small.width);
   for (const d of state.discs) {
-    const x = d.x * scale, y = d.y * scale, r = d.r * scale;
+    const center = projection ? { x: d.x, y: d.y } : { x: d.x * scale, y: d.y * scale };
+    const r = projection ? d.r : d.r * scale, p = map(center), edge = map({ x: center.x + r, y: center.y });
     ctx.strokeStyle = d.team === 0 ? '#a0ddf3' : '#f7b2a1'; ctx.lineWidth = 2 * scale;
-    ctx.beginPath(); ctx.arc(x, y, r + 3 * scale, 0, Math.PI * 2); ctx.stroke();
+    outline(center, r + (projection ? 3 : 3 * scale));
     ctx.font = `bold ${12 * scale}px system-ui`; ctx.fillStyle = '#fff'; ctx.strokeStyle = '#183b36'; ctx.lineWidth = 3 * scale;
-    const label = `${d.team === 0 ? 'A' : 'B'}${d.id}`; ctx.strokeText(label, x + r + 6, y); ctx.fillText(label, x + r + 6, y);
+    const label = `${d.team === 0 ? 'A' : 'B'}${d.id}`; ctx.strokeText(label, edge.x + 6, p.y); ctx.fillText(label, edge.x + 6, p.y);
   }
   ctx.restore();
 }
-const calibrationSteps = ['Click the centre of the 20 hole.', 'Click the 15-point circle line (not a peg).', 'Click the 10-point circle line.', 'Click the outer 5-point / shooting line.', 'Click the centre of a disc on the board.', 'Click the outside edge of that same disc.'];
 function startCalibration() {
   if (state.mode === 'idle' || state.recording) return;
-  state.calibrationPoints = []; state.sampleTeam = null; $('stage').classList.add('calibrating');
-  ctx.drawImage(raw, 0, 0); $('stage-hint').textContent = `1 / 6 · ${calibrationSteps[0]} View frozen.`; updateControls();
+  guide.start($('calibration-mode').value);
 }
 function cancelCalibration() {
+  if (guide.active) { guide.cancel(); return; }
   state.calibrationPoints = null; state.sampleTeam = null; $('stage').classList.remove('calibrating');
-  $('stage-hint').textContent = 'Setup cancelled. Existing calibration is unchanged.'; configureWorker();
-  if (state.mode === 'file' && video.paused) { ctx.drawImage(raw, 0, 0); drawOverlay(); }
+  $('stage-hint').textContent = 'Colour sampling cancelled. Existing calibration is unchanged.'; configureWorker();
+  ctx.drawImage(raw, 0, 0); drawOverlay();
 }
 board.addEventListener('click', event => {
-  if (!state.calibrationPoints && state.sampleTeam === null) return;
+  if (state.sampleTeam === null || guide.active) return;
   const rect = board.getBoundingClientRect();
-  // The canvas is rendered at its intrinsic aspect ratio; no CSS crop/mirroring.
   const p = { x: (event.clientX - rect.left) * board.width / rect.width, y: (event.clientY - rect.top) * board.height / rect.height };
-  if (state.sampleTeam !== null) {
-    const team = state.sampleTeam, image = rawCtx.getImageData(0, 0, raw.width, raw.height);
-    const color = averageColor(image.data, raw.width, raw.height, p.x, p.y);
-    const other = state.colors[1 - team];
-    if (other && Math.hypot(...color.map((v, i) => v - other[i])) < 35) { notify('These colour samples are too similar. Sample the solid centre of differently coloured discs.', true); return; }
-    state.colors[team] = color; state.sampleTeam = null; $('stage').classList.remove('calibrating');
-    $('stage-hint').textContent = `Team ${team === 0 ? 'A' : 'B'} colour sampled. Tracking is experimental.`; configureWorker(); return;
-  }
-  state.calibrationPoints.push(p);
-  ctx.fillStyle = '#efce79'; ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill();
-  const n = state.calibrationPoints.length;
-  if (n < 6) { $('stage-hint').textContent = `${n + 1} / 6 · ${calibrationSteps[n]} View frozen.`; return; }
-  try {
-    const c = makeCalibration(state.calibrationPoints, board.width, board.height);
-    state.calibration = c; state.background = null; state.colors = [null, null];
-    $('stage-hint').textContent = 'Geometry set. Clear all discs and hands, then save the empty board.';
-    notify('Calibration saved for this view. Recalibrate whenever the camera or board moves. Perspective correction is not included.');
-  } catch (error) { notify(error.message, true); }
-  state.calibrationPoints = null; $('stage').classList.remove('calibrating'); configureWorker(); ctx.drawImage(raw, 0, 0); drawOverlay();
+  const team = state.sampleTeam, image = rawCtx.getImageData(0, 0, raw.width, raw.height);
+  const color = averageColor(image.data, raw.width, raw.height, p.x, p.y), other = state.colors[1 - team];
+  if (other && Math.hypot(...color.map((v, i) => v - other[i])) < 35) { notify('These colour samples are too similar. Sample the solid centre of differently coloured pucks.', true); return; }
+  state.colors[team] = color; state.sampleTeam = null; $('stage').classList.remove('calibrating');
+  $('stage-hint').textContent = `Team ${team === 0 ? 'A' : 'B'} colour sampled. Tracking remains experimental.`; configureWorker();
 });
 function saveBackground() {
   if (!state.calibration || state.recording) return;
@@ -210,6 +217,8 @@ function paintDemo(t, empty = false) {
   rawCtx.fillStyle = '#223e35'; rawCtx.fillRect(0, 0, 960, 720);
   circle(480, 360, 325, '#102a25'); circle(480, 360, 309, '#a78052'); circle(480, 360, 294, '#2d2922'); circle(480, 360, 280, '#dfc594', '#705939');
   for (const r of [185, 94]) circle(480, 360, r, '#dfc594', '#a48453');
+  rawCtx.strokeStyle = '#705939'; rawCtx.lineWidth = 2;
+  for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2; rawCtx.beginPath(); rawCtx.moveTo(480 + 268 * Math.cos(a), 360 + 268 * Math.sin(a)); rawCtx.lineTo(480 + 280 * Math.cos(a), 360 + 280 * Math.sin(a)); rawCtx.stroke(); }
   for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; circle(480 + Math.cos(a) * 94, 360 + Math.sin(a) * 94, 5, '#4a3929'); }
   circle(480, 360, 17, '#483927'); circle(480, 360, 12, '#302c22');
   rawCtx.fillStyle = '#886d48'; rawCtx.font = '16px Georgia'; rawCtx.textAlign = 'center'; rawCtx.fillText('5', 690, 363); rawCtx.fillText('10', 620, 363); rawCtx.fillText('15', 545, 363);
@@ -311,7 +320,7 @@ function openReplay(id) {
 }
 function download(blob, name) { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 15000); }
 function exportSession() {
-  const payload = { schemaVersion: 1, appVersion: VERSION, exportedAt: new Date().toISOString(), automaticVerdictsEnabled: false, activeConfiguration: configSnapshot(), match: { names: state.names, mode: $('score-mode').value, scores: state.scores, totals: state.totals, round: state.round, rounds: state.rounds }, clips: state.clips.map(({ blob, url, ...c }) => ({ ...c, videoIncluded: false, videoMime: blob.type, videoBytes: blob.size })), limitations: ['No automatic first-contact or foul decisions.', 'Proximity is not proof of impact.', 'Calibration requires a near-vertical view; no perspective correction.', 'Video must be exported separately.', 'Observed callbacks are not a sensor-frame guarantee.'] };
+  const payload = { schemaVersion: 1, appVersion: VERSION, exportedAt: new Date().toISOString(), automaticVerdictsEnabled: false, activeConfiguration: configSnapshot(), match: { names: state.names, mode: $('score-mode').value, scores: state.scores, totals: state.totals, round: state.round, rounds: state.rounds }, clips: state.clips.map(({ blob, url, ...c }) => ({ ...c, videoIncluded: false, videoMime: blob.type, videoBytes: blob.size })), limitations: ['No automatic first-contact or foul decisions.', 'Proximity is not proof of impact.', 'Angled calibration corrects the board plane, not occlusion, lens distortion or puck/peg height.', 'Video must be exported separately.', 'Observed callbacks are not a sensor-frame guarantee.'] };
   download(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), `crokinole-match-${new Date().toISOString().slice(0, 10)}.json`);
 }
 function saveMatch() { try { localStorage.setItem('crokinole-ref-match-v1', JSON.stringify({ names: state.names, scores: state.scores, totals: state.totals, rounds: state.rounds, round: state.round, mode: $('score-mode').value })); } catch { notify('Browser storage is unavailable. Export the match log before closing.', true); } }

@@ -1,12 +1,10 @@
-"""Real Chromium smoke tests; fake camera, not validation of physical crokinole footage.
-Run: python -m pip install playwright==1.57.0 && playwright install chromium
-     python tests/browser_smoke.py [http://127.0.0.1:8080]
-"""
+"""Chromium API smoke checks with a synthetic camera, not physical-board validation."""
 import functools
 import http.server
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import threading
 import time
@@ -34,6 +32,15 @@ checks = []
 def passed(name):
     checks.append(name)
     print(f'PASS {name}', flush=True)
+def click_guide_points(page, points):
+    canvas = page.locator('#cal-image')
+    dimensions = canvas.evaluate('(c) => ({w:c.width,h:c.height})')
+    for index, (x,y) in enumerate(points):
+        canvas.scroll_into_view_if_needed()
+        box = canvas.bounding_box()
+        canvas.click(position={'x':x/dimensions['w']*box['width'], 'y':y/dimensions['h']*box['height']})
+        if index < len(points)-1:
+            expect(page.locator('#calibration-dialog')).to_have_attribute('data-step',str(index+2))
 
 with sync_playwright() as p:
     executable = os.environ.get('CHROMIUM_PATH')
@@ -70,24 +77,46 @@ with sync_playwright() as p:
     page.screenshot(path=str(OUT/'demo.png'), full_page=True)
     assert page.locator('#board').evaluate('(c)=>Math.abs(c.getBoundingClientRect().width/c.getBoundingClientRect().height-c.width/c.height) < 0.01')
     passed('synthetic demo traverses real worker detector; canvas aspect ratio is preserved')
+    page.locator('#calibration-mode').select_option('overhead')
     page.locator('#calibrate').click()
-    canvas = page.locator('#board')
-    for index, (x,y) in enumerate([(480,360),(574,360),(665,360),(760,360),(620,290),(634,290)]):
-        # The setup button can scroll the board above the viewport. Never use
-        # stale absolute mouse coordinates: click relative to the visible canvas.
-        canvas.scroll_into_view_if_needed()
-        box = canvas.bounding_box()
-        canvas.click(position={'x': x/960*box['width'], 'y': y/720*box['height']})
-        if index < 5:
-            expect(page.locator('#stage-hint')).to_contain_text(f'{index+2} / 6')
-    expect(page.locator('#stage-hint')).to_contain_text('Geometry set.')
-    page.screenshot(path=str(OUT/'calibration.png'), full_page=True)
-    expect(page.locator('#calibration-status')).to_contain_text('28 px')
+    expect(page.locator('#cal-instruction')).to_contain_text('middle of the round opening')
+    expect(page.locator('#cal-apply')).to_be_disabled()
+    click_guide_points(page,[(480,360),(574,360),(665,360),(760,360),(620,290),(634,290)])
+    expect(page.locator('#cal-apply')).to_be_enabled()
+    expect(page.locator('#tracking-status')).to_contain_text('active')
+    page.screenshot(path=str(OUT/'overhead-calibration-preview.png'), full_page=True)
+    page.locator('#cal-apply').click()
     expect(page.locator('#tracking-status')).to_contain_text('save an empty board')
+    previous = page.locator('#calibration-status').inner_text()
+    assert 25 <= int(re.search(r'(\d+) px',previous).group(1)) <= 31
     page.locator('#calibrate').click()
-    page.locator('#cancel-calibrate').click()
-    expect(page.locator('#calibration-status')).to_contain_text('28 px')
-    passed('six-click calibration and cancellation preserve prior valid geometry')
+    page.locator('#cal-close').click()
+    expect(page.locator('#calibration-status')).to_have_text(previous)
+    passed('guided overhead calibration requires confirmation and cancellation preserves prior geometry')
+    page.locator('#calibration-mode').select_option('angled')
+    page.locator('#calibrate').click()
+    click_guide_points(page,[(480,360)])
+    expect(page.locator('#cal-title')).to_contain_text('quarter mark A')
+    expect(page.locator('#cal-instruction')).to_contain_text('FOUR')
+    page.locator('#cal-undo').click()
+    expect(page.locator('#calibration-dialog')).to_have_attribute('data-step','1')
+    click_guide_points(page,[(480,360),(480,80),(760,360),(480,640),(200,360),(574,360),(665,360),(620,290),(634,290)])
+    expect(page.locator('#cal-apply')).to_be_enabled()
+    expect(page.locator('#cal-example-label')).to_contain_text('Straightened')
+    page.screenshot(path=str(OUT/'angled-calibration-preview.png'), full_page=True)
+    page.locator('#cal-apply').click()
+    expect(page.locator('#calibration-status')).to_contain_text('Perspective fit')
+    expect(page.locator('#score-0')).to_have_text('20')
+    expect(page.locator('#tracking-status')).to_contain_text('save an empty board')
+    # Let the new worker configuration build its warp map before proceeding.
+    page.wait_for_timeout(400)
+    previous=page.locator('#calibration-status').inner_text()
+    page.locator('#calibrate').click()
+    page.locator('#cal-retake').click()
+    expect(page.locator('#calibration-dialog')).to_have_attribute('data-step','1')
+    page.locator('#cal-close').click()
+    expect(page.locator('#calibration-status')).to_have_text(previous)
+    passed('nine-click perspective guide, undo, retake, corrected preview and manual apply')
     page.locator('#stop-source').click()
     page.locator('#connect').click()
     expect(page.locator('#source-badge')).to_contain_text('LIVE', timeout=15000)
@@ -144,6 +173,12 @@ with sync_playwright() as p:
     assert mobile.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
     mobile.screenshot(path=str(OUT/'mobile.png'), full_page=True)
     passed('390 px mobile layout has no horizontal overflow and demo remains usable')
+    mobile.locator('#calibrate').click()
+    expect(mobile.locator('#cal-instruction')).to_be_visible()
+    assert mobile.locator('#calibration-dialog').evaluate('(d)=>d.scrollWidth <= d.clientWidth + 1')
+    mobile.screenshot(path=str(OUT/'mobile-calibration-guide.png'), full_page=True)
+    mobile.locator('#cal-close').click()
+    passed('mobile calibration instructions and diagram fit without horizontal overflow')
     denied=browser.new_context()
     dp=denied.new_page()
     dp.add_init_script("navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('denied','NotAllowedError'); };")

@@ -16,3 +16,11 @@ A browser smoke pass validates those software paths in that environment, not cam
 ## Publication
 
 The workflow stages only runtime assets and setup docs, then records the deployed source commit in `build-info.json` and verifies that exact SHA after publishing. Pages settings may require one-time user enablement. A successful source push or a green unit test alone is not proof the site is live.
+
+## Angled-camera / instruction update
+
+19 new local Node tests pass for non-affine projective fitting, inverse mapping, centre cross-check, invalid marks, ring/disc validation, scaled sampling, bilinear pixel values, frame-size mismatch, instruction coverage and two-puck detection after rectifying a synthetic oblique image/background. These are synthetic geometry tests, not camera accuracy measurements.
+
+The calibration component was additionally exercised in a local in-memory Chromium page with no network or camera: both click sequences, corrected preview, manual apply, cancellation preserving prior state, and 390 px layout. The actual component source was used; this is narrower than an end-to-end app test.
+
+The repository browser suite retains camera/replay/scoring regression checks and now covers the guide, perspective mode, undo, retake, manual confirmation and mobile instructions. Consult the latest PR/CI result for the combined suite outcome.
