@@ -90,6 +90,7 @@ with sync_playwright() as p:
     expect(page.locator('#calibration-status')).to_contain_text('Smart fit')
     expect(page.locator('#tracking-status')).to_contain_text('save an empty board')
     passed('one-click smart calibration finds board, centre and scoring rings, then requires confirmation')
+    page.locator('.manual-calibration summary').click()
     page.locator('#calibration-mode').select_option('overhead')
     page.locator('#calibrate').click()
     expect(page.locator('#cal-instruction')).to_contain_text('middle of the round opening')
