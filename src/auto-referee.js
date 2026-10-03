@@ -109,7 +109,7 @@ export class AutoShotAnalyzer {
         const outerRadius=this.calibration?.rings?.[2]||Infinity;
         const outOfPlay=[...this.tracks.values()].filter(t=>!currentIds.has(t.id)&&!possibleConfirmed.some(v=>v.id===t.id)&&t.last&&this.calibration&&distance(t.last,this.calibration.center)>=outerRadius-t.r*2.2);
         const outIds=new Set(outOfPlay.map(t=>t.id));
-        const unexplainedLosses=[...this.tracks.values()].filter(t=>!currentIds.has(t.id)&&!possibleConfirmed.some(v=>v.id===t.id)&&!outIds.has(t.id)&&t.last);
+        const unexplainedLosses=[...this.tracks.values()].filter(t=>!currentIds.has(t.id)&&!possibleConfirmed.some(v=>v.id===t.id)&&!outIds.has(t.id)&&t.last&&(t.team===0||t.team===1)&&missingByTeam[t.team]>0);
 
         // A stable-looking frame with an unexplained interior loss is not a settled board.
         // Keep waiting for the detector to recover instead of scoring an incomplete snapshot.
