@@ -243,7 +243,7 @@ function paintDemo(t, empty = false) {
   circle(480, 360, 325, '#102a25'); circle(480, 360, 309, '#a78052'); circle(480, 360, 294, '#2d2922'); circle(480, 360, 280, '#dfc594', '#705939');
   for (const r of [260, 185, 94]) circle(480, 360, r, '#dfc594', '#a48453');
   rawCtx.strokeStyle = '#705939'; rawCtx.lineWidth = 2;
-  for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2; rawCtx.beginPath(); rawCtx.moveTo(480 + 268 * Math.cos(a), 360 + 268 * Math.sin(a)); rawCtx.lineTo(480 + 280 * Math.cos(a), 360 + 280 * Math.sin(a)); rawCtx.stroke(); }
+  for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2; rawCtx.beginPath(); rawCtx.moveTo(480 + 250 * Math.cos(a), 360 + 250 * Math.sin(a)); rawCtx.lineTo(480 + 260 * Math.cos(a), 360 + 260 * Math.sin(a)); rawCtx.stroke(); }
   for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; circle(480 + Math.cos(a) * 94, 360 + Math.sin(a) * 94, 5, '#4a3929'); }
   circle(480, 360, 17, '#483927'); circle(480, 360, 12, '#302c22');
   rawCtx.fillStyle = '#886d48'; rawCtx.font = '16px Georgia'; rawCtx.textAlign = 'center'; rawCtx.fillText('5', 690, 363); rawCtx.fillText('10', 620, 363); rawCtx.fillText('15', 545, 363);
