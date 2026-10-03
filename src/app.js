@@ -74,13 +74,13 @@ function resetAutoRound() {
   if ($('auto-score-detail')) $('auto-score-detail').textContent = '20s: A 0 · B 0';
 }
 function applyAutomaticScore(event) {
+  const willApply = !!$('auto-scoring')?.checked && event.applyScore;
+  if (willApply) snapshotScore();
   for (const twenty of event.twentiesAdded || []) if (twenty.team === 0 || twenty.team === 1) state.auto.twenties[twenty.team]++;
   const score = scoreSettledBoard(event.postDiscs || [], state.calibration, state.auto.twenties);
   event.score = score; state.auto.lastResult = event; state.auto.lastLiveScore = score;
   if ($('auto-score-detail')) $('auto-score-detail').textContent = `Board A ${score.visible[0]} · B ${score.visible[1]} · 20s A ${state.auto.twenties[0]} · B ${state.auto.twenties[1]} · total ${score.totals[0]}–${score.totals[1]}`;
-  if ($('auto-scoring')?.checked && event.applyScore) {
-    snapshotScore(); state.scores = [...score.totals]; saveMatch(); renderScore();
-  }
+  if (willApply) { state.scores = [...score.totals]; saveMatch(); renderScore(); }
   return score;
 }
 function handleAutoUpdate(auto) {
