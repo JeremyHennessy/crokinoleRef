@@ -1,0 +1,22 @@
+name: Pre-roll review source
+on:
+  push:
+    branches: [feature/buffered-shot-clips]
+    paths: [.github/workflows/preroll-review-source.yml]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Package tracked source for local tests
+        run: git archive --format=tar HEAD > preroll-source.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preroll-source
+          path: preroll-source.tar
+          retention-days: 1
