@@ -50,7 +50,7 @@ export class AutoShotAnalyzer {
   setCalibration(calibration){this.calibration=calibration||null;}
   resetRound(){
     this.active=false;this.shotNumber=0;this.twenties=[0,0];this.last=[];this.lastSettled=[];
-    this.motionFrames=0;this.stableSince=null;this.startedAt=null;this.preDiscs=[];this.tracks=new Map();this.hadFrameGap=false;this.contacts=[];
+    this.motionFrames=0;this.stableSince=null;this.startedAt=null;this.preDiscs=[];this.tracks=new Map();this.hadFrameGap=false;this.contacts=[];this.armed=false;this.baselineKey='';this.baselineStreak=0;
   }
   _recordTracks(discs,time){
     for(const d of discs||[]){
@@ -74,13 +74,24 @@ export class AutoShotAnalyzer {
     let event=null;
 
     if(!this.active){
-      if(!frameGap&&moving.length){this.motionFrames++;}else this.motionFrames=0;
+      const counts=[0,0];for(const d of current)if(d.team===0||d.team===1)counts[d.team]++;
+      const key=counts.join(':');
+      const quiet=!frameGap&&maxMotion<this.options.moveStop&&topologyAppeared===0&&topologyDisappeared===0;
+      if(quiet){
+        if(this.baselineKey===key)this.baselineStreak++;else{this.baselineKey=key;this.baselineStreak=1;}
+        // Keep the most complete repeatedly observed settled board. A one-frame
+        // detector dropout must not redefine the pre-shot baseline.
+        if(this.baselineStreak>=3&&current.length>=this.lastSettled.length){
+          this.lastSettled=current.map(cloneDisc);this.armed=true;
+        }
+      } else if(topologyAppeared||topologyDisappeared){
+        this.baselineStreak=0;this.baselineKey='';this.armed=false;
+      }
+      if(this.armed&&!frameGap&&moving.length){this.motionFrames++;}else this.motionFrames=0;
       if(this.motionFrames>=1){
-        this.active=true;this.shotNumber++;this.startedAt=time;this.stableSince=null;this.hadFrameGap=false;this.contacts=[];
+        this.active=true;this.armed=false;this.shotNumber++;this.startedAt=time;this.stableSince=null;this.hadFrameGap=false;this.contacts=[];
         this.tracks=new Map();const seed=this.lastSettled.length?this.lastSettled:previous;this.preDiscs=seed.map(cloneDisc);this._recordTracks(seed,time);this._recordTracks(current,time);
         event={type:'shot-start',shotNumber:this.shotNumber,time,movingDiscIds:moving,preDiscs:this.preDiscs.map(cloneDisc)};
-      } else if(!frameGap&&maxMotion<this.options.moveStop&&topologyAppeared===0&&topologyDisappeared===0) {
-        this.lastSettled=current.map(cloneDisc);
       }
     } else {
       this._recordTracks(current,time);
@@ -140,7 +151,7 @@ export class AutoShotAnalyzer {
           contacts:this.contacts.slice(0,300),hadFrameGap:this.hadFrameGap,timedOut,
           confidence,applyScore:!timedOut&&!unexplainedLosses.length&&confidence>=.62
         };
-        this.active=false;this.stableSince=null;this.startedAt=null;this.motionFrames=0;this.tracks=new Map();this.contacts=[];
+        this.active=false;this.armed=false;this.baselineKey='';this.baselineStreak=0;this.stableSince=null;this.startedAt=null;this.motionFrames=0;this.tracks=new Map();this.contacts=[];
         this.lastSettled=current.map(cloneDisc);
       }
     }
@@ -154,7 +165,7 @@ export class AutoShotAnalyzer {
       appeared,
       disappeared,
       score:!this.active&&this.calibration?scoreSettledBoard(current,this.calibration,this.twenties):null,
-      twenties:[...this.twenties]
+      twenties:[...this.twenties],armed:this.armed,baselineCount:this.lastSettled.length
     };
   }
 }
