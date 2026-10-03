@@ -3,7 +3,7 @@ import { distance, suggestedScore } from './core.js';
 const cloneDisc=d=>({id:d.id,team:d.team,x:d.x,y:d.y,r:d.r});
 function geometricPairs(previous,current) {
   const candidates=[];
-  previous.forEach((p,pi)=>current.forEach((d,di)=>{if(p.team===d.team)candidates.push({p,d,pi,di,dist:distance(p,d)});}));
+  previous.forEach((p,pi)=>current.forEach((d,di)=>{if(p.team===d.team&&distance(p,d)<=Math.max(p.r,d.r)*6)candidates.push({p,d,pi,di,dist:distance(p,d)});}));
   candidates.sort((a,b)=>a.dist-b.dist);
   const usedP=new Set(),usedD=new Set(),pairs=[];
   for(const c of candidates){
@@ -14,11 +14,12 @@ function geometricPairs(previous,current) {
   return pairs;
 }
 
-export function scoreSettledBoard(discs, calibration, twenties=[0,0]) {
+export function scoreSettledBoard(discs, calibration, twenties=[0,0], adjustments=[0,0]) {
   if(!calibration) return {totals:[0,0],visible:[0,0],twenties:[...twenties],items:[],review:true,reviewReasons:['No calibration']};
+  if (![twenties,adjustments].every(v=>Array.isArray(v)&&v.length===2&&v.every(Number.isSafeInteger))||twenties.some(v=>v<0)) throw Error('Invalid score ledger.');
   const visible=[0,0],items=[],reviewReasons=[];
   for(const d of discs||[]) {
-    if(d.team!==0&&d.team!==1){reviewReasons.push('Unclassified puck');continue;}
+    if((d.team!==0&&d.team!==1)||![d.x,d.y,d.r].every(Number.isFinite)||d.r<=0){reviewReasons.push('Invalid or unclassified puck');continue;}
     const tolerance=Math.max(2,calibration.discRadius*.16);
     const suggestion=suggestedScore(d,calibration,tolerance);
     visible[d.team]+=suggestion.value;
@@ -28,7 +29,7 @@ export function scoreSettledBoard(discs, calibration, twenties=[0,0]) {
   return {
     visible,
     twenties:[...twenties],
-    totals:visible.map((n,i)=>n+(twenties[i]||0)*20),
+    totals:visible.map((n,i)=>Math.max(0,n+twenties[i]*20+adjustments[i])),
     items,
     review:reviewReasons.length>0,
     reviewReasons
@@ -50,7 +51,7 @@ export class AutoShotAnalyzer {
   setCalibration(calibration){this.calibration=calibration||null;}
   resetRound(){
     this.active=false;this.shotNumber=0;this.twenties=[0,0];this.last=[];this.lastSettled=[];
-    this.motionFrames=0;this.stableSince=null;this.startedAt=null;this.preDiscs=[];this.tracks=new Map();this.hadFrameGap=false;this.contacts=[];this.armed=false;this.baselineKey='';this.baselineStreak=0;
+    this.motionFrames=0;this.stableSince=null;this.startedAt=null;this.preDiscs=[];this.tracks=new Map();this.hadFrameGap=false;this.hadObstruction=false;this.contacts=[];this.armed=false;this.baselineKey='';this.baselineStreak=0;this.entryPending=false;this.requireEmpty=false;
   }
   _recordTracks(discs,time){
     for(const d of discs||[]){
@@ -62,6 +63,7 @@ export class AutoShotAnalyzer {
     }
   }
   update(frame,time){
+    if (!Number.isFinite(time)) throw Error('Invalid frame timestamp.');
     const current=(frame.discs||[]).map(cloneDisc),previous=this.last;
     const prevBy=new Map(previous.map(d=>[d.id,d])),curBy=new Map(current.map(d=>[d.id,d]));
     const matched=geometricPairs(previous,current);
@@ -71,13 +73,21 @@ export class AutoShotAnalyzer {
     const disappeared=previous.filter(d=>!curBy.has(d.id)).map(d=>d.id);
     const topologyAppeared=Math.max(0,current.length-matched.length),topologyDisappeared=Math.max(0,previous.length-matched.length);
     const frameGap=!!frame.frameGap;
+    const obstructed=!!frame.viewObstructed;
+    if(this.requireEmpty){
+      if(current.length===0&&!frameGap&&!obstructed){this.baselineStreak++;}else this.baselineStreak=0;
+      if(this.baselineStreak>=3){this.requireEmpty=false;this.lastSettled=[];this.armed=true;}
+      this.last=current;
+      return {event:null,state:'awaiting-clear',score:null,twenties:[...this.twenties],armed:false};
+    }
     let event=null;
 
     if(!this.active){
+      if(topologyAppeared&&!frameGap&&!obstructed)this.entryPending=true;
       const counts=[0,0];for(const d of current)if(d.team===0||d.team===1)counts[d.team]++;
       const key=counts.join(':');
-      const quiet=!frameGap&&maxMotion<this.options.moveStop&&topologyAppeared===0&&topologyDisappeared===0;
-      const initializing=previous.length===0&&current.length>0&&this.lastSettled.length===0;
+      const quiet=!frameGap&&!obstructed&&maxMotion<this.options.moveStop&&topologyAppeared===0&&topologyDisappeared===0;
+      const initializing=!frameGap&&!obstructed&&previous.length===0&&current.length>0&&this.lastSettled.length===0;
       if(initializing){
         // The first observed board is observation one, not a "puck appeared" event.
         // A second matching settled frame is still required before arming.
@@ -92,17 +102,20 @@ export class AutoShotAnalyzer {
       } else if(topologyAppeared||topologyDisappeared){
         this.baselineStreak=0;this.baselineKey='';this.armed=false;
       }
-      if(this.armed&&!frameGap&&moving.length){this.motionFrames++;}else this.motionFrames=0;
+      // A puck first observed already moving can trigger a clip after two matched observations.
+      const movingEntry=!this.armed&&(this.entryPending||this.baselineStreak===1)&&previous.length>0&&topologyDisappeared===0;
+      if((this.armed||movingEntry)&&!frameGap&&!obstructed&&moving.length){this.motionFrames++;}else this.motionFrames=0;
       if(this.motionFrames>=1){
-        this.active=true;this.armed=false;this.shotNumber++;this.startedAt=time;this.stableSince=null;this.hadFrameGap=false;this.contacts=[];
-        this.tracks=new Map();const seed=this.lastSettled.length?this.lastSettled:previous;this.preDiscs=seed.map(cloneDisc);this._recordTracks(seed,time);this._recordTracks(current,time);
+        this.active=true;this.armed=false;this.entryPending=false;this.shotNumber++;this.startedAt=time;this.stableSince=null;this.hadFrameGap=false;this.hadObstruction=false;this.contacts=[];
+        this.tracks=new Map();const seed=previous.length>=this.lastSettled.length?previous:this.lastSettled;this.preDiscs=seed.map(cloneDisc);this._recordTracks(seed,time);this._recordTracks(current,time);
         event={type:'shot-start',shotNumber:this.shotNumber,time,movingDiscIds:moving,preDiscs:this.preDiscs.map(cloneDisc)};
       }
     } else {
       this._recordTracks(current,time);
       if(frameGap)this.hadFrameGap=true;
+      if(obstructed)this.hadObstruction=true;
       if(frame.contacts?.length)this.contacts.push(...frame.contacts);
-      const stable=!frameGap&&maxMotion<this.options.moveStop&&topologyAppeared===0&&topologyDisappeared===0;
+      const stable=!frameGap&&!obstructed&&maxMotion<this.options.moveStop&&topologyAppeared===0&&topologyDisappeared===0;
       if(stable){if(this.stableSince===null)this.stableSince=time;}else this.stableSince=null;
       const settledReady=this.stableSince!==null&&time-this.stableSince>=this.options.settleSeconds;
       const timedOut=time-this.startedAt>=this.options.maxShotSeconds;
@@ -121,7 +134,7 @@ export class AutoShotAnalyzer {
           const sameTeamNearCentre=current.some(d=>d.team===t.team&&this.calibration&&distance(d,this.calibration.center)<=limit*1.15);
           if(!sameTeamNearCentre)twentyCandidates.push({id:t.id,team:t.team,minCenterDistance:t.minCenterDistance,last:t.last});
         }
-        const possibleConfirmed=!this.hadFrameGap&&!timedOut&&twentyCandidates.length===1?twentyCandidates:[];
+        const possibleConfirmed=[]; // No automatic 20 awards from disappearance alone.
         const outerRadius=this.calibration?.rings?.[2]||Infinity;
         const outOfPlay=[...this.tracks.values()].filter(t=>!currentIds.has(t.id)&&!possibleConfirmed.some(v=>v.id===t.id)&&t.last&&this.calibration&&distance(t.last,this.calibration.center)>=outerRadius-t.r*2.2);
         const outIds=new Set(outOfPlay.map(t=>t.id));
@@ -129,7 +142,7 @@ export class AutoShotAnalyzer {
 
         // A stable-looking frame with an unexplained interior loss is not a settled board.
         // Keep waiting for the detector to recover instead of scoring an incomplete snapshot.
-        if(settledReady&&!timedOut&&unexplainedLosses.length){
+        if(settledReady&&!timedOut&&unexplainedLosses.length&&!twentyCandidates.length){
           this.last=current;
           return {
             event:null,state:'moving',shotNumber:this.shotNumber,maxMotion,movingDiscIds:moving,appeared,disappeared,
@@ -137,7 +150,7 @@ export class AutoShotAnalyzer {
           };
         }
 
-        const confirmedTwenties=timedOut?[]:possibleConfirmed;
+        const confirmedTwenties=[];
         for(const t of confirmedTwenties)this.twenties[t.team]++;
         const score=scoreSettledBoard(current,this.calibration,this.twenties);
         let confidence=1;
@@ -153,10 +166,12 @@ export class AutoShotAnalyzer {
           twentyCandidates:twentyCandidates.map(v=>({id:v.id,team:v.team,minCenterDistance:v.minCenterDistance})),
           outOfPlay:outOfPlay.map(v=>({id:v.id,team:v.team,last:v.last})),
           unexplainedLosses:unexplainedLosses.map(v=>({id:v.id,team:v.team,last:v.last})),
-          contacts:this.contacts.slice(0,300),hadFrameGap:this.hadFrameGap,timedOut,
-          confidence,applyScore:!timedOut&&!unexplainedLosses.length&&confidence>=.62
+          contacts:this.contacts.slice(0,300),hadFrameGap:this.hadFrameGap,hadObstruction:this.hadObstruction,timedOut,
+          // This is a heuristic diagnostic, NOT a calibrated probability.
+          confidence,confidenceKind:'heuristic-not-probability',
+          applyScore:!timedOut&&!this.hadFrameGap&&!this.hadObstruction&&!unexplainedLosses.length&&!twentyCandidates.length&&!score.review
         };
-        this.active=false;this.armed=false;this.baselineKey='';this.baselineStreak=0;this.stableSince=null;this.startedAt=null;this.motionFrames=0;this.tracks=new Map();this.contacts=[];
+        this.active=false;this.armed=false;this.entryPending=false;this.baselineKey='';this.baselineStreak=0;this.stableSince=null;this.startedAt=null;this.motionFrames=0;this.tracks=new Map();this.contacts=[];
         this.lastSettled=current.map(cloneDisc);
       }
     }

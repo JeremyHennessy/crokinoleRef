@@ -85,7 +85,10 @@ with sync_playwright() as p:
     expect(auto_page.locator('#score-1')).to_have_text('25')
     expect(auto_page.locator('#auto-score-detail')).to_contain_text('total 25–25')
     expect(auto_page.locator('#auto-status')).to_contain_text('settled')
-    passed('auto referee segments synthetic shot and applies settled-board score')
+    assert auto_page.evaluate("JSON.parse(localStorage.getItem('crokinole-ref-match-v1')).scores[0]") == 20
+    auto_page.locator('#stop-source').click()
+    expect(auto_page.locator('#score-0')).to_have_text('20')
+    passed('auto demo scores 25–25 without persisting over the real match; disconnect restores it')
     auto_page.close()
     # Restart the demo so the centre hole is unobstructed, then exercise the real smart-calibration detector.
     page.locator('#stop-source').click()
@@ -130,7 +133,7 @@ with sync_playwright() as p:
     page.screenshot(path=str(OUT/'angled-calibration-preview.png'), full_page=True)
     page.locator('#cal-apply').click()
     expect(page.locator('#calibration-status')).to_contain_text('Perspective fit')
-    expect(page.locator('#score-0')).to_have_text('20')
+    assert page.evaluate("JSON.parse(localStorage.getItem('crokinole-ref-match-v1')).scores[0]") == 20
     expect(page.locator('#tracking-status')).to_contain_text('save an empty board')
     # Let the new worker configuration build its warp map before proceeding.
     page.wait_for_timeout(400)
@@ -188,6 +191,73 @@ with sync_playwright() as p:
     expect(page.locator('#record')).to_be_disabled()
     page.locator('#file-play').click()
     passed('exported local recording can be reimported without a server upload')
+    # End-to-end AUTOMATIC clips: no Record/Finish-clip calls in this test.
+    for angled in (False, True):
+        ac=browser.new_context(viewport={'width':1440,'height':1100},accept_downloads=True)
+        ap=ac.new_page()
+        ap.on('pageerror',lambda e:errors.append(str(e)))
+        ap.add_init_script((ROOT/'tests/synthetic_camera.js').read_text())
+        ap.goto(base,wait_until='networkidle')
+        ap.evaluate('(angled)=>{window.syntheticCamera.angled=angled;}',angled)
+        ap.locator('#connect').click()
+        expect(ap.locator('#source-badge')).to_contain_text('LIVE')
+        ap.wait_for_timeout(1200)
+        if ap.locator('#calibration-dialog').is_visible():ap.locator('#cal-close').click()
+        ap.locator('.manual-calibration summary').click()
+        ap.locator('#calibration-mode').select_option('angled' if angled else 'overhead')
+        ap.locator('#calibrate').click()
+        plain=[(480,360),(480,100),(740,360),(480,620),(220,360),(574,360),(665,360),(620,290),(634,290)] if angled else [(480,360),(574,360),(665,360),(740,360),(620,290),(634,290)]
+        transformed=[(x+.10*y-30,.08*x+.72*y+75) if angled else (x,y) for x,y in plain]
+        click_guide_points(ap,transformed)
+        expect(ap.locator('#cal-apply')).to_be_enabled()
+        ap.locator('#cal-apply').click()
+        ap.evaluate("window.syntheticCamera.mode='empty'")
+        ap.wait_for_timeout(250)
+        ap.locator('#background').click()
+        ap.evaluate("window.syntheticCamera.mode='pucks'")
+        ap.wait_for_timeout(250)
+        for team,(x,y) in [('a',(620,290)),('b',(340,410))]:
+            ap.locator('#sample-'+team).click()
+            if angled:x,y=x+.10*y-30,.08*x+.72*y+75
+            canvas=ap.locator('#board');canvas.scroll_into_view_if_needed();box=canvas.bounding_box()
+            canvas.click(position={'x':x/960*box['width'],'y':y/720*box['height']})
+        expect(ap.locator('#disc-count')).to_have_text('4',timeout=15000)
+        ap.wait_for_timeout(300)
+        ap.evaluate('window.syntheticCamera.shoot()')
+        expect(ap.locator('#clip-count')).to_have_text('1',timeout=15000)
+        expect(ap.locator('#score-0')).to_have_text('25')
+        expect(ap.locator('#score-1')).to_have_text('25')
+        expect(ap.locator('.clip').first).to_contain_text('AUTO CLIP')
+        assert 'INCOMPLETE' not in ap.locator('.clip').first.inner_text()
+        ap.screenshot(path=str(OUT/('auto-camera-angled.png' if angled else 'auto-camera-overhead.png')),full_page=True)
+        ap.locator('.clip').first.get_by_role('button',name='Review',exact=True).click()
+        ap.wait_for_function("document.querySelector('#replay-video').readyState >= 2")
+        assert ap.locator('#replay-video').evaluate('(v)=>v.videoWidth')==960
+        with ap.expect_download() as result:ap.locator('#download-clip').click()
+        auto_path=OUT/('auto-angled.webm' if angled else 'auto-overhead.webm')
+        result.value.save_as(str(auto_path));assert auto_path.stat().st_size>1000
+        ap.locator('#close-replay').click()
+        # Manual corrections / confirmed 20 bank must survive the NEXT auto shot.
+        ap.get_by_role('button',name='Add 20 points to team A',exact=True).click()
+        ap.get_by_role('button',name='Add 5 points to team A',exact=True).click()
+        ap.wait_for_timeout(250)
+        ap.evaluate('window.syntheticCamera.second()')
+        expect(ap.locator('#clip-count')).to_have_text('2',timeout=15000)
+        expect(ap.locator('#score-0')).to_have_text('50')
+        expect(ap.locator('#score-1')).to_have_text('25')
+        with ap.expect_download() as result:ap.locator('#export-session').click()
+        log_path=OUT/('auto-angled.json' if angled else 'auto-overhead.json');result.value.save_as(str(log_path))
+        alog=json.loads(log_path.read_text())
+        assert alog['automaticVerdictsEnabled'] is False
+        assert alog['clips'][0]['autoTriggered'] is True
+        assert alog['clips'][0]['autoResult']['scoreApplied'] is True
+        assert alog['autoReferee']['twenties']==[1,0]
+        assert alog['autoReferee']['adjustments']==[5,0]
+        assert alog['clips'][0]['preRollSeconds']==0
+        ap.locator('#stop-source').click()
+        assert ap.locator('#source-video').evaluate('(v)=>v.srcObject===null')
+        ap.close();ac.close()
+        passed(('angled' if angled else 'overhead')+' synthetic camera: auto trigger → playable/exportable clip → 25–25 score; next shot preserves 20s and corrections')
     mobile=context.new_page()
     mobile.set_viewport_size({'width':390,'height':844})
     mobile.goto(base,wait_until='networkidle')
