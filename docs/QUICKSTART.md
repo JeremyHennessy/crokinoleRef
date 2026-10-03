@@ -1,6 +1,14 @@
 # First game setup
 
-## Camera position and the guided calibration
+## Smart setup — start here
+
+After connecting the webcam, Crokinole Ref automatically tries to find the board. It looks for the large round light playing surface, identifies the dark 20 hole, uses those two features to correct the camera perspective, then searches the straightened image for the three printed scoring circles. If confidence is high enough, it opens a preview automatically. You can also press **Find board automatically** at any time.
+
+**No calibration clicks and no puck are required for this step.** The coloured guides must still be checked before pressing **Use this calibration**. The gold outer guide is the detected playing-surface boundary; the other guides should follow the printed scoring circles. The straightened preview should look circular. Smart setup estimates the initial puck radius from board geometry; later detection provides the practical check.
+
+If the board, 20 hole, or scoring circles cannot be found confidently, nothing is applied. Improve framing/lighting and try again, or open **Manual fallback**. A failed automatic attempt does not damage the previous calibration.
+
+## Manual fallback: guided calibration
 
 Choose **Angled view · around 45°** for an oblique camera, or **Overhead** only when the board already looks circular. The angled option corrects the board plane before experimental tracking. It does not recover hidden pucks, improve the camera's frame rate, remove lens distortion, or correct the height of pegs/pucks above the board.
 

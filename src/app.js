@@ -1,26 +1,28 @@
 import { VERSION, clamp, makeCalibration, scaleCalibration, roundResult, captureConstraints, averageColor } from './core.js';
 import { CalibrationGuide } from './calibration-guide.js';
 import { projectPoint, samplingMatrix } from './perspective.js';
+import { autoCalibrateFrame, scaleAutoProjectionToSource } from './auto-calibration.js';
 const $ = id => document.getElementById(id);
 const board = $('board'), ctx = board.getContext('2d');
 const video = $('source-video'), raw = document.createElement('canvas'), rawCtx = raw.getContext('2d', { willReadFrequently: true });
 const small = document.createElement('canvas'), smallCtx = small.getContext('2d', { willReadFrequently: true });
+const smart = document.createElement('canvas'), smartCtx = smart.getContext('2d', { willReadFrequently: true });
 const MB = 1024 * 1024, MAX_CLIP = 64 * MB, MAX_TOTAL = 128 * MB;
-const state = { mode: 'idle', token: 0, generation: 0, stream: null, sourceURL: null, callback: null, raf: null, calibration: null, projection: null, background: null, colors: [null, null], discs: [], contacts: [], calibrationPoints: null, sampleTeam: null, inflight: false, time: 0, lastTime: null, gaps: [], observed: 0, analysed: 0, statStart: performance.now(), fps: 0, analysisFps: 0, clips: [], selected: null, recording: null, settings: {}, names: ['Team A', 'Team B'], scores: [0, 0], totals: [0, 0], rounds: [], undo: [], round: 1, demoStart: 0 };
+const state = { mode: 'idle', token: 0, generation: 0, stream: null, sourceURL: null, callback: null, raf: null, calibration: null, projection: null, background: null, colors: [null, null], discs: [], contacts: [], calibrationPoints: null, sampleTeam: null, smartBusy: false, inflight: false, time: 0, lastTime: null, gaps: [], observed: 0, analysed: 0, statStart: performance.now(), fps: 0, analysisFps: 0, clips: [], selected: null, recording: null, settings: {}, names: ['Team A', 'Team B'], scores: [0, 0], totals: [0, 0], rounds: [], undo: [], round: 1, demoStart: 0 };
 const guide = new CalibrationGuide({
   getFrame: () => { if (['camera', 'file'].includes(state.mode) && video.readyState >= 2) rawCtx.drawImage(video, 0, 0, raw.width, raw.height); return raw; },
   onOpen: () => { state.calibrationPoints = []; state.sampleTeam = null; $('stage').classList.remove('calibrating'); updateControls(); },
   onCancel: () => { state.calibrationPoints = null; $('stage-hint').textContent = 'Calibration cancelled. The previous calibration is unchanged.'; configureWorker(); ctx.drawImage(raw, 0, 0); drawOverlay(); },
-  onApply: ({ calibration, projection }) => {
-    state.calibration = calibration; state.projection = projection; state.calibrationPoints = null; state.background = null; state.colors = [null, null];
+  onApply: ({ calibration, projection, confidence, diagnostics }) => {
+    state.calibration = calibration; state.projection = projection ? { ...projection, ...(Number.isFinite(confidence) ? { autoConfidence: confidence, autoDiagnostics: diagnostics } : {}) } : projection; state.calibrationPoints = null; state.background = null; state.colors = [null, null];
     $('stage-hint').textContent = 'Geometry set. Clear all pucks and hands, then save the empty board.';
     configureWorker(); ctx.drawImage(raw, 0, 0); drawOverlay();
-    notify(projection ? 'Board-plane perspective correction applied. Clear the board for a new background. Hidden pucks, lens distortion and raised puck/peg surfaces remain limitations.' : 'Overhead calibration applied. Clear the board, save its empty view, then sample both puck colours.');
+    notify(Number.isFinite(confidence) ? `Smart calibration applied at ${Math.round(confidence * 100)}% confidence. Clear the board for a new background; visual fit remains the authority.` : projection ? 'Board-plane perspective correction applied. Clear the board for a new background. Hidden pucks, lens distortion and raised puck/peg surfaces remain limitations.' : 'Overhead calibration applied. Clear the board, save its empty view, then sample both puck colours.');
   }
 });
 let worker;
 try {
-  worker = new Worker(new URL('./vision-worker.js?calibration=2', import.meta.url), { type: 'module' });
+  worker = new Worker(new URL('./vision-worker.js?smart=1', import.meta.url), { type: 'module' });
   worker.onmessage = ({ data: m }) => {
     if (m.generation !== state.generation) return;
     state.inflight = false;
@@ -49,16 +51,16 @@ function configureWorker() {
 }
 function readyToTrack() { return !!(worker && state.calibration && state.background && state.colors.every(Boolean)); }
 function updateControls() {
-  const active = state.mode !== 'idle', busy = !!state.recording, calibrating = !!state.calibrationPoints;
+  const active = state.mode !== 'idle', busy = !!state.recording, calibrating = !!state.calibrationPoints, smartBusy = state.smartBusy;
   $('stop-source').disabled = !active || busy; $('connect').disabled = busy;
   $('record').disabled = state.mode !== 'camera' || busy || calibrating || state.sampleTeam !== null || !window.MediaRecorder;
   $('record').hidden = busy; $('stop-record').hidden = !busy; $('record-label').hidden = !busy;
-  $('calibrate').disabled = !active || busy; $('background').disabled = !state.calibration || busy || calibrating;
+  $('calibrate').disabled = !active || busy || smartBusy; $('auto-calibrate').disabled = !active || busy || calibrating || smartBusy; $('background').disabled = !state.calibration || busy || calibrating || smartBusy;
   $('sample-a').disabled = !state.background || busy || calibrating; $('sample-b').disabled = !state.background || busy || calibrating;
-  ['camera', 'capture-mode', 'calibration-mode', 'import-video', 'import-button', 'tolerance', 'refresh-cameras'].forEach(id => { $(id).disabled = busy; });
+  ['camera', 'capture-mode', 'calibration-mode', 'import-video', 'import-button', 'tolerance', 'refresh-cameras'].forEach(id => { $(id).disabled = busy || smartBusy; });
   $('demo').disabled = busy; $('cancel-calibrate').hidden = !calibrating && state.sampleTeam === null;
   $('tracking-status').textContent = !worker ? 'Tracking unavailable in this browser' : readyToTrack() ? 'Experimental tracking active · human review required' : !state.calibration ? 'Waiting for calibration' : !state.background ? 'Next: save an empty board' : 'Next: sample both team colours';
-  $('calibration-status').textContent = state.calibration ? `${state.projection ? 'Perspective fit' : state.mode === 'demo' ? 'Demo geometry' : 'Overhead fit'} · ${Math.round(state.calibration.discRadius * 2)} px puck diameter${state.projection ? ' in corrected view' : ''}` : 'Not calibrated';
+  $('calibration-status').textContent = state.calibration ? `${Number.isFinite(state.projection?.autoConfidence) ? `Smart fit ${Math.round(state.projection.autoConfidence * 100)}%` : state.projection ? 'Perspective fit' : state.mode === 'demo' ? 'Demo geometry' : 'Overhead fit'} · ${Math.round(state.calibration.discRadius * 2)} px puck diameter${state.projection ? ' in corrected view' : ''}` : state.smartBusy ? 'Finding board automatically…' : 'Not calibrated';
   $('file-controls').hidden = state.mode !== 'file';
   $('record-hint').textContent = state.mode === 'demo' ? 'Demo is synthetic. Connect a camera to record real evidence.' : !window.MediaRecorder ? 'Recording is unavailable in this browser. You can still import clips.' : 'Start a clip before shooting. No pre-roll. Clips stop after 30 seconds.';
 }
@@ -120,7 +122,8 @@ async function connect() {
       if (state.recording) await finishClip(); stopSource(); notify('Camera disconnected. Any completed clip remains in this tab.', true);
     });
     configureWorker(); scheduleVideo(token); await listCameras();
-    notify('Camera connected. Calibrate the board, then save an empty-board view and sample the disc colours.');
+    notify('Camera connected. Smart setup will try to find the board automatically; you can always use the manual guide.');
+    setTimeout(() => { if (token === state.token && state.mode === 'camera' && !state.calibration && !guide.active) smartCalibrate(true); }, 850);
   } catch (error) {
     stream?.getTracks().forEach(t => t.stop());
     if (token !== state.token) return;
@@ -182,6 +185,28 @@ function drawOverlay() {
   }
   ctx.restore();
 }
+function smartCalibrate(automatic = false) {
+  if (state.mode === 'idle' || state.recording || guide.active || state.smartBusy) return;
+  state.smartBusy = true; updateControls();
+  try {
+    if (['camera', 'file'].includes(state.mode) && video.readyState >= 2) rawCtx.drawImage(video, 0, 0, raw.width, raw.height);
+    const maxWidth = 800, scale = Math.min(1, maxWidth / raw.width);
+    smart.width = Math.max(240, Math.round(raw.width * scale)); smart.height = Math.max(180, Math.round(raw.height * scale));
+    smartCtx.drawImage(raw, 0, 0, smart.width, smart.height);
+    notify(automatic ? 'Smart setup is checking the board geometry…' : 'Smart setup is finding the playing surface, 20 hole and scoring rings…');
+    const image = smartCtx.getImageData(0, 0, smart.width, smart.height);
+    const result = autoCalibrateFrame(image.data, smart.width, smart.height);
+    const projection = scaleAutoProjectionToSource(result.projection, smart.width / raw.width);
+    guide.previewAuto(raw, { calibration: result.calibration, projection, confidence: result.confidence, diagnostics: result.diagnostics });
+    notify(`Smart setup found a ${Math.round(result.confidence * 100)}% confidence calibration. Check the coloured ring overlay and straightened preview before accepting it.`);
+  } catch (error) {
+    state.calibrationPoints = null;
+    const prefix = automatic ? 'Smart setup could not finish automatically. ' : '';
+    notify(prefix + error.message + ' The manual guide is still available.', !automatic);
+  } finally {
+    state.smartBusy = false; updateControls();
+  }
+}
 function startCalibration() {
   if (state.mode === 'idle' || state.recording) return;
   guide.start($('calibration-mode').value);
@@ -216,9 +241,9 @@ function circle(x, y, r, fill, stroke = null) { rawCtx.beginPath(); rawCtx.arc(x
 function paintDemo(t, empty = false) {
   rawCtx.fillStyle = '#223e35'; rawCtx.fillRect(0, 0, 960, 720);
   circle(480, 360, 325, '#102a25'); circle(480, 360, 309, '#a78052'); circle(480, 360, 294, '#2d2922'); circle(480, 360, 280, '#dfc594', '#705939');
-  for (const r of [185, 94]) circle(480, 360, r, '#dfc594', '#a48453');
+  for (const r of [260, 185, 94]) circle(480, 360, r, '#dfc594', '#4a3929');
   rawCtx.strokeStyle = '#705939'; rawCtx.lineWidth = 2;
-  for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2; rawCtx.beginPath(); rawCtx.moveTo(480 + 268 * Math.cos(a), 360 + 268 * Math.sin(a)); rawCtx.lineTo(480 + 280 * Math.cos(a), 360 + 280 * Math.sin(a)); rawCtx.stroke(); }
+  for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2; rawCtx.beginPath(); rawCtx.moveTo(480 + 250 * Math.cos(a), 360 + 250 * Math.sin(a)); rawCtx.lineTo(480 + 260 * Math.cos(a), 360 + 260 * Math.sin(a)); rawCtx.stroke(); }
   for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; circle(480 + Math.cos(a) * 94, 360 + Math.sin(a) * 94, 5, '#4a3929'); }
   circle(480, 360, 17, '#483927'); circle(480, 360, 12, '#302c22');
   rawCtx.fillStyle = '#886d48'; rawCtx.font = '16px Georgia'; rawCtx.textAlign = 'center'; rawCtx.fillText('5', 690, 363); rawCtx.fillText('10', 620, 363); rawCtx.fillText('15', 545, 363);
@@ -231,7 +256,7 @@ function paintDemo(t, empty = false) {
 function startDemo() {
   if (!stopSource()) return;
   state.mode = 'demo'; resize(960, 720);
-  state.calibration = makeCalibration([{ x: 480, y: 360 }, { x: 574, y: 360 }, { x: 665, y: 360 }, { x: 760, y: 360 }, { x: 620, y: 290 }, { x: 634, y: 290 }], 960, 720);
+  state.calibration = makeCalibration([{ x: 480, y: 360 }, { x: 574, y: 360 }, { x: 665, y: 360 }, { x: 740, y: 360 }, { x: 620, y: 290 }, { x: 634, y: 290 }], 960, 720);
   paintDemo(0, true); smallCtx.drawImage(raw, 0, 0, small.width, small.height); state.background = smallCtx.getImageData(0, 0, small.width, small.height).data;
   state.colors = [[46, 113, 143], [168, 64, 54]]; state.demoStart = performance.now();
   $('welcome').hidden = true; $('demo-label').hidden = false; $('source-badge').textContent = 'DEMO · simulated board'; $('reported-fps').textContent = 'Synthetic';
@@ -355,7 +380,7 @@ function renderScore() {
   for (const r of [...state.rounds].reverse().slice(0, 10)) { const row = document.createElement('div'); row.className = 'round-entry'; row.textContent = `Round ${r.round}: ${r.scores?.join(' – ')} → awarded ${r.awarded?.join(' – ')}`; $('round-history').append(row); }
 }
 $('connect').onclick = connect; $('refresh-cameras').onclick = listCameras; $('stop-source').onclick = stopSource; $('demo').onclick = startDemo;
-$('calibrate').onclick = startCalibration; $('cancel-calibrate').onclick = cancelCalibration; $('background').onclick = saveBackground;
+$('auto-calibrate').onclick = () => smartCalibrate(false); $('calibrate').onclick = startCalibration; $('cancel-calibrate').onclick = cancelCalibration; $('background').onclick = saveBackground;
 $('sample-a').onclick = () => sampleTeam(0); $('sample-b').onclick = () => sampleTeam(1);
 $('tolerance').oninput = () => { $('tolerance-value').value = $('tolerance').value; configureWorker(); };
 $('overlays').onchange = () => { if (state.mode !== 'idle') { ctx.drawImage(raw, 0, 0); drawOverlay(); } };

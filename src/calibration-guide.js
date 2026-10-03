@@ -16,7 +16,7 @@ export function calibrationSteps(mode) {
 }
 export class CalibrationGuide {
   constructor({ getFrame, onOpen, onApply, onCancel }) {
-    Object.assign(this,{ getFrame,onOpen,onApply,onCancel,active:false,points:[],candidate:null });
+    Object.assign(this,{ getFrame,onOpen,onApply,onCancel,active:false,points:[],candidate:null,auto:false });
     const dialog=document.createElement('dialog'); dialog.id='calibration-dialog';
     dialog.innerHTML=`<div class="cal-heading"><div><p class="eyebrow">GUIDED CALIBRATION · FROZEN IMAGE</p><h2 id="cal-title">Set up the board</h2></div><button id="cal-close" class="secondary">Cancel</button></div>
       <div id="cal-progress" class="cal-progress" role="status" aria-live="polite"></div>
@@ -48,10 +48,18 @@ export class CalibrationGuide {
   coordinates(event) { const r=this.canvas.getBoundingClientRect();return {x:(event.clientX-r.left)*this.canvas.width/r.width,y:(event.clientY-r.top)*this.canvas.height/r.height}; }
   start(mode='angled') {
     if(this.active) return;
-    this.mode=mode;this.steps=calibrationSteps(mode);this.active=true;this.onOpen();this.capture();this.dialog.showModal();
+    this.auto=false;this.mode=mode;this.steps=calibrationSteps(mode);this.active=true;this.onOpen();this.capture();this.dialog.showModal();
+  }
+  previewAuto(source,result) {
+    if(this.active) return;
+    this.auto=true;this.mode='auto';this.steps=[];this.active=true;this.onOpen();
+    this.canvas.width=this.frame.width=source.width;this.canvas.height=this.frame.height=source.height;
+    this.frameCtx.drawImage(source,0,0);this.points=[];this.candidate=result;this.error='';
+    this.dialog.showModal();this.render();
   }
   capture() {
     const source=this.getFrame();
+    this.auto=false;
     this.canvas.width=this.frame.width=source.width;this.canvas.height=this.frame.height=source.height;
     this.frameCtx.drawImage(source,0,0);this.points=[];this.candidate=null;this.error='';this.render();
   }
@@ -60,6 +68,19 @@ export class CalibrationGuide {
     this.active=false;this.dialog.close();this.onCancel();
   }
   render() {
+    if(this.auto) {
+      const confidence=Math.round((this.candidate?.confidence||0)*100),d=this.candidate?.diagnostics;
+      this.dialog.dataset.step='auto';
+      this.$('cal-title').textContent='Smart setup found the board';
+      this.$('cal-progress').textContent=`Automatic calibration · ${confidence}% confidence · confirm the preview`;
+      this.$('cal-instruction').textContent='The app found the playing surface, 20 hole and three scoring rings without clicks. Check that the coloured guides sit on the real printed rings all the way around and that the straightened preview looks circular. If they do, use this calibration.';
+      this.$('cal-feedback').textContent=d?`Detected ring radii: ${this.candidate.calibration.rings.map(v=>Math.round(v)).join(' / ')} corrected px. Puck size is an initial estimate and will be checked by tracking after colour sampling.`:'Automatic candidate ready for review.';
+      this.$('cal-feedback').classList.remove('cal-error');
+      this.$('cal-undo').hidden=true;this.$('cal-retake').hidden=true;this.$('cal-apply').disabled=false;
+      this.$('cal-mode-note').textContent='Smart setup uses the round playing-surface boundary and the 20 hole to rectify the board plane, then finds the printed scoring circles radially. It still cannot recover hidden pucks or contacts.';
+      this.ctx.drawImage(this.frame,0,0);this.drawGuides();this.drawExample('preview');return;
+    }
+    this.$('cal-undo').hidden=false;this.$('cal-retake').hidden=false;
     const n=this.points.length, ready=!!this.candidate, failed=n===this.steps.length&&!ready;
     const step=this.steps[Math.min(n,this.steps.length-1)];this.dialog.dataset.step=String(n+1);
     this.$('cal-title').textContent=ready?'Check the fit before using it':failed?'One of the clicks needs correction':step.title;
@@ -82,7 +103,12 @@ export class CalibrationGuide {
   drawGuides() {
     const {calibration:c,projection:p}=this.candidate,ctx=this.ctx;
     ctx.save();ctx.strokeStyle='#88eddf';ctx.lineWidth=Math.max(2,this.canvas.width/500);ctx.setLineDash([8,6]);
-    for(const r of c.rings) {ctx.beginPath();for(let i=0;i<=96;i++){const a=i*Math.PI/48,pt={x:c.center.x+r*Math.cos(a),y:c.center.y+r*Math.sin(a)},v=p?projectPoint(p.boardToImage,pt):pt;if(i)ctx.lineTo(v.x,v.y);else ctx.moveTo(v.x,v.y);}ctx.stroke();}ctx.restore();
+    for(const r of c.rings) {ctx.beginPath();for(let i=0;i<=96;i++){const a=i*Math.PI/48,pt={x:c.center.x+r*Math.cos(a),y:c.center.y+r*Math.sin(a)},v=p?projectPoint(p.boardToImage,pt):pt;if(i)ctx.lineTo(v.x,v.y);else ctx.moveTo(v.x,v.y);}ctx.stroke();}
+    if(p?.method==='automatic-playing-surface-ellipse-plus-20-hole'){
+      ctx.strokeStyle='#f4d178';ctx.setLineDash([3,7]);ctx.beginPath();
+      for(let i=0;i<=96;i++){const a=i*Math.PI/48,v=projectPoint(p.boardToImage,{x:320+280*Math.cos(a),y:320+280*Math.sin(a)});if(i)ctx.lineTo(v.x,v.y);else ctx.moveTo(v.x,v.y);}ctx.stroke();
+      ctx.setLineDash([]);const centre=projectPoint(p.boardToImage,{x:320,y:320});ctx.fillStyle='#f4d178';ctx.beginPath();ctx.arc(centre.x,centre.y,Math.max(5,this.canvas.width/180),0,Math.PI*2);ctx.fill();
+    }ctx.restore();
   }
   drawExample(target) {
     const cv=this.$('cal-example'),g=cv.getContext('2d');g.clearRect(0,0,240,240);
