@@ -94,7 +94,8 @@ function handleAutoUpdate(auto) {
   }
   const event = auto.event;
   if (!event) {
-    if ($('auto-status') && readyToTrack()) $('auto-status').textContent = auto.state === 'moving' ? `Shot in motion · tracking ${state.discs.length} puck${state.discs.length === 1 ? '' : 's'}` : `Ready · tracking ${state.discs.length} puck${state.discs.length === 1 ? '' : 's'}`;
+    if ($('auto-status') && readyToTrack() && auto.state === 'moving') $('auto-status').textContent = `Shot in motion · tracking ${state.discs.length} puck${state.discs.length === 1 ? '' : 's'}`;
+    else if ($('auto-status') && readyToTrack() && !state.auto.lastResult) $('auto-status').textContent = `Ready · tracking ${state.discs.length} puck${state.discs.length === 1 ? '' : 's'}`;
     return;
   }
   if (event.type === 'shot-start') {
