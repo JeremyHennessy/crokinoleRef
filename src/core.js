@@ -104,6 +104,6 @@ export class Tracker {
     }
     const discontinuity = gap || old.some(p => !current.some(d => d.id === p.id));
     this.previous = current; this.time = time;
-    return { discs: current, contacts, discontinuity };
+    return { discs: current, contacts, discontinuity, frameGap: gap };
   }
 }
