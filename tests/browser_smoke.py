@@ -187,6 +187,7 @@ with sync_playwright() as p:
     assert mobile.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
     mobile.screenshot(path=str(OUT/'mobile.png'), full_page=True)
     passed('390 px mobile layout has no horizontal overflow and demo remains usable')
+    mobile.locator('.manual-calibration summary').click()
     mobile.locator('#calibrate').click()
     expect(mobile.locator('#cal-instruction')).to_be_visible()
     assert mobile.locator('#calibration-dialog').evaluate('(d)=>d.scrollWidth <= d.clientWidth + 1')
