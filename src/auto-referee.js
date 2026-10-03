@@ -38,7 +38,7 @@ export function scoreSettledBoard(discs, calibration, twenties=[0,0]) {
 export class AutoShotAnalyzer {
   constructor(calibration, options={}) {
     this.options={
-      moveStart:options.moveStart??.42,
+      moveStart:options.moveStart??.20,
       moveStop:options.moveStop??.16,
       settleSeconds:options.settleSeconds??.65,
       maxShotSeconds:options.maxShotSeconds??10,
