@@ -65,7 +65,9 @@ export class CalibrationGuide {
     this.$('cal-title').textContent=ready?'Check the fit before using it':failed?'One of the clicks needs correction':step.title;
     this.$('cal-progress').textContent=ready?`${n} / ${n} points placed · confirm the preview`:`Step ${Math.min(n+1,this.steps.length)} of ${this.steps.length} · ${this.mode==='angled'?'Angled camera':'Overhead camera'}`;
     this.$('cal-instruction').textContent=ready?'The coloured guides should follow the printed circles all the way around. The straightened preview should show circular scoring rings. If they do not line up, undo or retake — do not accept a poor fit.':failed?'Your previous calibration is unchanged. Use Undo last click to work back to the mistaken point, or retake the image and start again.':step.text;
-    this.$('cal-feedback').textContent=this.error||(ready?'No new calibration is applied until you press “Use this calibration”.':`${n} point${n===1?'':'s'} placed. A mistaken click can be undone.`);
+    const fit=this.candidate?.projection?.anchorRmsErrorPx;
+    const fitNote=Number.isFinite(fit)?` Best-fit landmark residual: ${fit.toFixed(1)} corrected px. Small mismatch is expected from manual clicks and webcam distortion; use the coloured overlay as the final check.`:'';
+    this.$('cal-feedback').textContent=this.error||(ready?`No new calibration is applied until you press “Use this calibration”.${fitNote}`:`${n} point${n===1?'':'s'} placed. A mistaken click can be undone.`);
     this.$('cal-feedback').classList.toggle('cal-error',!!this.error);
     this.$('cal-undo').disabled=n===0;this.$('cal-apply').disabled=!ready;
     this.$('cal-mode-note').textContent=this.mode==='angled'?'Use four known quarter-turn marks on the FLAT playing surface. If they are missing or hidden, cancel rather than guessing. Perspective correction cannot reveal hidden pucks or remove puck-height/peg parallax.':'Overhead mode assumes the board already appears circular. Use angled mode for an oval board; stretching a circle by eye is not calibration.';

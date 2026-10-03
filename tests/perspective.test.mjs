@@ -9,8 +9,15 @@ const points=()=>board.map(p=>projectPoint(H,p));
 const near=(a,b,t=1e-7)=>assert.ok(Math.abs(a-b)<t,`${a} != ${b}`);
 test('non-affine oblique projection round-trips through inverse',()=>{const p={x:520,y:430},q=projectPoint(invertHomography(H),projectPoint(H,p));near(p.x,q.x);near(p.y,q.y);});
 test('four reference pairs recover a projective transform',()=>{const from=board.slice(1,5),to=from.map(p=>projectPoint(H,p)),h=fitHomography(from,to);const p={x:371,y:211},a=projectPoint(h,p),b=projectPoint(H,p);near(a.x,b.x);near(a.y,b.y);});
-test('oblique calibration restores known board radii and puck size',()=>{const {calibration:c,projection:p}=makePerspectiveCalibration(points(),960,720);near(c.rings[0],94);near(c.rings[1],185);near(c.rings[2],280);near(c.discRadius,14);near(p.centerCheckErrorPx,0);});
-test('centre opening is checked independently of four fitted marks',()=>{const ps=points();ps[0].x+=45;assert.throws(()=>makePerspectiveCalibration(ps,960,720),/centre hole/);});
+test('oblique calibration restores known board radii and puck size',()=>{const {calibration:c,projection:p}=makePerspectiveCalibration(points(),960,720);near(c.rings[0],94);near(c.rings[1],185);near(c.rings[2],280);near(c.discRadius,14);near(p.centerCheckErrorPx,0);near(p.anchorRmsErrorPx,0);});
+test('moderate real-world centre mismatch is absorbed into a five-landmark best fit',()=>{
+  const ps=points();ps[0].x+=45;
+  const {projection:p}=makePerspectiveCalibration(ps,960,720);
+  assert.ok(p.rawCenterCheckErrorPx>14);
+  assert.ok(p.centerCheckErrorPx<p.rawCenterCheckErrorPx);
+  assert.ok(p.anchorRmsErrorPx<30);
+});
+test('gross centre mismatch is still rejected',()=>{const ps=points();ps[0].x+=220;assert.throws(()=>makePerspectiveCalibration(ps,960,720),/centre hole is far/);});
 test('crossed mark order rejected',()=>{const ps=points();[ps[2],ps[3]]=[ps[3],ps[2]];assert.throws(()=>makePerspectiveCalibration(ps,960,720),/order/);});
 test('duplicate mark rejected',()=>{const ps=points();ps[2]=ps[1];assert.throws(()=>makePerspectiveCalibration(ps,960,720));});
 test('missing point rejected without applying partial geometry',()=>assert.throws(()=>makePerspectiveCalibration(points().slice(0,8),960,720)));
