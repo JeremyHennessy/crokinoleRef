@@ -89,7 +89,10 @@ export class AutoShotAnalyzer {
         const confirmedTwenties=!this.hadFrameGap&&twentyCandidates.length===1?twentyCandidates:[];
         for(const t of confirmedTwenties)this.twenties[t.team]++;
         const score=scoreSettledBoard(current,this.calibration,this.twenties);
-        const unexplainedLosses=[...this.tracks.values()].filter(t=>!currentIds.has(t.id)&&!confirmedTwenties.some(v=>v.id===t.id)&&t.last);
+        const outerRadius=this.calibration?.rings?.[2]||Infinity;
+        const outOfPlay=[...this.tracks.values()].filter(t=>!currentIds.has(t.id)&&!confirmedTwenties.some(v=>v.id===t.id)&&t.last&&this.calibration&&distance(t.last,this.calibration.center)>=outerRadius-t.r*2.2);
+        const outIds=new Set(outOfPlay.map(t=>t.id));
+        const unexplainedLosses=[...this.tracks.values()].filter(t=>!currentIds.has(t.id)&&!confirmedTwenties.some(v=>v.id===t.id)&&!outIds.has(t.id)&&t.last);
         let confidence=1;
         if(this.hadFrameGap)confidence-=.38;
         if(unexplainedLosses.length)confidence-=Math.min(.35,unexplainedLosses.length*.12);
@@ -101,6 +104,7 @@ export class AutoShotAnalyzer {
           type:'shot-end',shotNumber:this.shotNumber,time,startedAt:this.startedAt,duration:time-this.startedAt,
           postDiscs:current.map(cloneDisc),score,twentiesAdded:confirmedTwenties.map(v=>({id:v.id,team:v.team})),
           twentyCandidates:twentyCandidates.map(v=>({id:v.id,team:v.team,minCenterDistance:v.minCenterDistance})),
+          outOfPlay:outOfPlay.map(v=>({id:v.id,team:v.team,last:v.last})),
           unexplainedLosses:unexplainedLosses.map(v=>({id:v.id,team:v.team,last:v.last})),
           contacts:this.contacts.slice(0,300),hadFrameGap:this.hadFrameGap,
           confidence,applyScore:confidence>=.62
