@@ -139,8 +139,15 @@ export class AutoShotAnalyzer {
           if(!sameTeamNearCentre)twentyCandidates.push({id:t.id,team:t.team,minCenterDistance:t.minCenterDistance,last:t.last});
         }
         const possibleConfirmed=[]; // No automatic 20 awards from disappearance alone.
-        const outerRadius=this.calibration?.rings?.[2]||Infinity;
-        const outOfPlay=[...this.tracks.values()].filter(t=>!currentIds.has(t.id)&&!possibleConfirmed.some(v=>v.id===t.id)&&t.last&&this.calibration&&distance(t.last,this.calibration.center)>=outerRadius-t.r*2.2);
+        // A last-seen puck near the edge can still be worth five points. Only
+        // explain its loss as zero-point/out-of-play when that last observed
+        // footprint was already outside the scoring circle, beyond line tolerance.
+        // Otherwise wait for recovery or hold the result for human review.
+        const outOfPlay=[...this.tracks.values()].filter(t=>{
+          if(currentIds.has(t.id)||!t.last||!this.calibration)return false;
+          const lastScore=suggestedScore(t.last,this.calibration,Math.max(2,this.calibration.discRadius*.16));
+          return lastScore.value===0&&!lastScore.review;
+        });
         const outIds=new Set(outOfPlay.map(t=>t.id));
         const unexplainedLosses=[...this.tracks.values()].filter(t=>!currentIds.has(t.id)&&!possibleConfirmed.some(v=>v.id===t.id)&&!outIds.has(t.id)&&t.last&&(t.team===0||t.team===1)&&missingByTeam[t.team]>0);
 
