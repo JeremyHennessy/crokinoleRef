@@ -49,7 +49,7 @@ function updateControls() {
   $('undo-calibrate').hidden = !calibrating || state.calibrationPoints.length === 0;
   $('restart-calibrate').hidden = !calibrating;
   $('accept-calibrate').hidden = !pending;
-  $('tracking-status').textContent = !worker ? 'Tracking unavailable in this browser' : readyToTrack() ? 'Experimental tracking active · human review required' : !state.calibration ? 'Waiting for calibration' : !state.background ? 'Next: save an empty board' : 'Next: sample both team colours';
+  $('tracking-status').textContent = calibrating ? 'Calibration in progress · tracking paused' : !worker ? 'Tracking unavailable in this browser' : readyToTrack() ? 'Experimental tracking active · human review required' : !state.calibration ? 'Waiting for calibration' : !state.background ? 'Next: save an empty board' : 'Next: sample both team colours';
   $('calibration-status').textContent = pending ? 'Alignment preview ready · verify the guides' : state.calibration ? `${state.mode === 'demo' ? 'Demo geometry' : state.calibration.perspective ? 'Angled view corrected' : 'Calibrated for this view'} · ${Math.round(state.calibration.discRadius * 2)} px corrected disc diameter` : 'Not calibrated';
   $('file-controls').hidden = state.mode !== 'file';
   $('record-hint').textContent = state.mode === 'demo' ? 'Demo is synthetic. Connect a camera to record real evidence.' : !window.MediaRecorder ? 'Recording is unavailable in this browser. You can still import clips.' : 'Start a clip before shooting. No pre-roll. Clips stop after 30 seconds.';
