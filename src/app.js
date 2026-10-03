@@ -2,13 +2,14 @@ import { VERSION, clamp, makeCalibration, scaleCalibration, roundResult, capture
 import { CalibrationGuide } from './calibration-guide.js';
 import { projectPoint, samplingMatrix } from './perspective.js';
 import { autoCalibrateFrame, scaleAutoProjectionToSource } from './auto-calibration.js';
+import { scoreSettledBoard } from './auto-referee.js';
 const $ = id => document.getElementById(id);
 const board = $('board'), ctx = board.getContext('2d');
 const video = $('source-video'), raw = document.createElement('canvas'), rawCtx = raw.getContext('2d', { willReadFrequently: true });
 const small = document.createElement('canvas'), smallCtx = small.getContext('2d', { willReadFrequently: true });
 const smart = document.createElement('canvas'), smartCtx = smart.getContext('2d', { willReadFrequently: true });
-const MB = 1024 * 1024, MAX_CLIP = 64 * MB, MAX_TOTAL = 128 * MB;
-const state = { mode: 'idle', token: 0, generation: 0, stream: null, sourceURL: null, callback: null, raf: null, calibration: null, projection: null, background: null, colors: [null, null], discs: [], contacts: [], calibrationPoints: null, sampleTeam: null, smartBusy: false, inflight: false, time: 0, lastTime: null, gaps: [], observed: 0, analysed: 0, statStart: performance.now(), fps: 0, analysisFps: 0, clips: [], selected: null, recording: null, settings: {}, names: ['Team A', 'Team B'], scores: [0, 0], totals: [0, 0], rounds: [], undo: [], round: 1, demoStart: 0 };
+const MB = 1024 * 1024, MAX_CLIP = 64 * MB, MAX_TOTAL = 256 * MB, MAX_CLIPS = 30;
+const state = { mode: 'idle', token: 0, generation: 0, stream: null, sourceURL: null, callback: null, raf: null, calibration: null, projection: null, background: null, colors: [null, null], discs: [], contacts: [], calibrationPoints: null, sampleTeam: null, smartBusy: false, inflight: false, time: 0, lastTime: null, gaps: [], observed: 0, analysed: 0, statStart: performance.now(), fps: 0, analysisFps: 0, clips: [], selected: null, recording: null, settings: {}, names: ['Team A', 'Team B'], scores: [0, 0], totals: [0, 0], rounds: [], undo: [], round: 1, demoStart: 0, auto: { twenties: [0, 0], shotCount: 0, activeShotNumber: null, lastResult: null, lastLiveScore: null, stopTimer: null } };
 const guide = new CalibrationGuide({
   getFrame: () => { if (['camera', 'file'].includes(state.mode) && video.readyState >= 2) rawCtx.drawImage(video, 0, 0, raw.width, raw.height); return raw; },
   onOpen: () => { state.calibrationPoints = []; state.sampleTeam = null; $('stage').classList.remove('calibrating'); updateControls(); },
@@ -37,6 +38,7 @@ try {
     if (m.contacts.length) {
       const e = m.contacts[0]; $('contact-status').textContent = `${state.mode === 'demo' ? 'SIMULATED · ' : ''}Possible contact: disc ${e.ids[0]} ↔ ${e.ids[1]}. Proximity only; impact and first-contact order need human review.`;
     }
+    if (m.auto) handleAutoUpdate(m.auto);
   };
   worker.onerror = () => { state.inflight = false; worker?.terminate(); worker = null; notify('Vision worker unavailable. Camera, replay and manual scoring can still be used.', true); };
 } catch { notify('This browser cannot start the tracking worker. Recording and manual scoring remain available.', true); }
@@ -62,9 +64,66 @@ function updateControls() {
   $('tracking-status').textContent = !worker ? 'Tracking unavailable in this browser' : readyToTrack() ? 'Experimental tracking active · human review required' : !state.calibration ? 'Waiting for calibration' : !state.background ? 'Next: save an empty board' : 'Next: sample both team colours';
   $('calibration-status').textContent = state.calibration ? `${Number.isFinite(state.projection?.autoConfidence) ? `Smart fit ${Math.round(state.projection.autoConfidence * 100)}%` : state.projection ? 'Perspective fit' : state.mode === 'demo' ? 'Demo geometry' : 'Overhead fit'} · ${Math.round(state.calibration.discRadius * 2)} px puck diameter${state.projection ? ' in corrected view' : ''}` : state.smartBusy ? 'Finding board automatically…' : 'Not calibrated';
   $('file-controls').hidden = state.mode !== 'file';
-  $('record-hint').textContent = state.mode === 'demo' ? 'Demo is synthetic. Connect a camera to record real evidence.' : !window.MediaRecorder ? 'Recording is unavailable in this browser. You can still import clips.' : 'Start a clip before shooting. No pre-roll. Clips stop after 30 seconds.';
+  $('record-hint').textContent = state.mode === 'demo' ? 'Demo is synthetic. Connect a camera to record real evidence.' : !window.MediaRecorder ? 'Recording is unavailable in this browser. You can still import clips.' : $('auto-clips')?.checked ? 'Auto clips start when puck motion is detected and stop after the board settles. Manual record remains available.' : 'Manual clip mode: start before shooting. Clips stop after 30 seconds.';
 }
 function resetStats() { state.lastTime = null; state.time = 0; state.gaps = []; state.observed = state.analysed = 0; state.fps = state.analysisFps = 0; state.statStart = performance.now(); $('observed-fps').textContent = '—'; $('frame-gap').textContent = '—'; }
+function resetAutoRound() {
+  state.auto.twenties = [0, 0]; state.auto.shotCount = 0; state.auto.activeShotNumber = null; state.auto.lastResult = null; state.auto.lastLiveScore = null;
+  worker?.postMessage({ type: 'reset-round' });
+  if ($('auto-status')) $('auto-status').textContent = readyToTrack() ? 'Ready · watching for puck movement' : 'Waiting for disc tracking';
+  if ($('auto-score-detail')) $('auto-score-detail').textContent = '20s: A 0 · B 0';
+}
+function applyAutomaticScore(event) {
+  for (const twenty of event.twentiesAdded || []) if (twenty.team === 0 || twenty.team === 1) state.auto.twenties[twenty.team]++;
+  const score = scoreSettledBoard(event.postDiscs || [], state.calibration, state.auto.twenties);
+  event.score = score; state.auto.lastResult = event; state.auto.lastLiveScore = score;
+  if ($('auto-score-detail')) $('auto-score-detail').textContent = `Board A ${score.visible[0]} · B ${score.visible[1]} · 20s A ${state.auto.twenties[0]} · B ${state.auto.twenties[1]} · total ${score.totals[0]}–${score.totals[1]}`;
+  if ($('auto-scoring')?.checked && event.applyScore) {
+    snapshotScore(); state.scores = [...score.totals]; saveMatch(); renderScore();
+  }
+  return score;
+}
+function handleAutoUpdate(auto) {
+  if (!auto) return;
+  if (auto.score && auto.state === 'settled') {
+    state.auto.lastLiveScore = scoreSettledBoard(state.discs, state.calibration, state.auto.twenties);
+    if ($('auto-score-detail')) {
+      const live = state.auto.lastLiveScore;
+      $('auto-score-detail').textContent = `Visible now: A ${live.visible[0]} · B ${live.visible[1]} · tracked 20s A ${state.auto.twenties[0]} · B ${state.auto.twenties[1]}`;
+    }
+  }
+  const event = auto.event;
+  if (!event) {
+    if ($('auto-status') && readyToTrack()) $('auto-status').textContent = auto.state === 'moving' ? `Shot in motion · tracking ${state.discs.length} puck${state.discs.length === 1 ? '' : 's'}` : `Ready · tracking ${state.discs.length} puck${state.discs.length === 1 ? '' : 's'}`;
+    return;
+  }
+  if (event.type === 'shot-start') {
+    state.auto.shotCount++; state.auto.activeShotNumber = state.auto.shotCount;
+    if ($('auto-status')) $('auto-status').textContent = `Shot ${state.auto.activeShotNumber} detected · tracking movement`;
+    if ($('auto-clips')?.checked && state.mode === 'camera' && !state.recording) startClip({ auto: true, shotNumber: state.auto.activeShotNumber });
+    return;
+  }
+  if (event.type === 'shot-end') {
+    const shotNumber = state.auto.activeShotNumber || state.auto.shotCount || event.shotNumber;
+    event.shotNumber = shotNumber;
+    const score = applyAutomaticScore(event);
+    const confidence = Math.round((event.confidence || 0) * 100);
+    const reviewBits = [];
+    if (event.hadFrameGap) reviewBits.push('frame gap');
+    if (event.unexplainedLosses?.length) reviewBits.push('lost puck');
+    if (score.review) reviewBits.push('line/centre call');
+    if (event.twentyCandidates?.length && !event.twentiesAdded?.length) reviewBits.push('possible 20');
+    if ($('auto-status')) $('auto-status').textContent = event.applyScore
+      ? `Shot ${shotNumber} settled · auto score ${score.totals[0]}–${score.totals[1]} · ${confidence}% confidence${reviewBits.length ? ' · review ' + reviewBits.join(', ') : ''}`
+      : `Shot ${shotNumber} settled · score held for review · ${confidence}% confidence · ${reviewBits.join(', ') || 'tracking uncertainty'}`;
+    if (state.recording?.auto && state.recording.shotNumber === shotNumber) {
+      state.recording.autoResult = { ...event, score };
+      if (state.auto.stopTimer) clearTimeout(state.auto.stopTimer);
+      state.auto.stopTimer = setTimeout(() => { if (state.recording?.auto && state.recording.shotNumber === shotNumber) finishClip(); }, 350);
+    }
+    state.auto.activeShotNumber = null;
+  }
+}
 function stopSource() {
   if (state.recording) { notify('Finish the current clip before changing the camera or source.', true); return false; }
   guide.cancel();
@@ -75,7 +134,7 @@ function stopSource() {
   state.stream?.getTracks().forEach(t => t.stop()); state.stream = null;
   video.pause(); video.srcObject = null; video.removeAttribute('src'); video.load();
   if (state.sourceURL) URL.revokeObjectURL(state.sourceURL); state.sourceURL = null;
-  state.mode = 'idle'; state.projection = null; state.calibration = state.background = state.calibrationPoints = null; state.sampleTeam = null; state.colors = [null, null]; state.settings = {};
+  state.mode = 'idle'; state.projection = null; state.calibration = state.background = state.calibrationPoints = null; state.sampleTeam = null; state.colors = [null, null]; state.settings = {}; state.auto.activeShotNumber = null; if (state.auto.stopTimer) clearTimeout(state.auto.stopTimer); state.auto.stopTimer = null;
   $('stage').classList.remove('calibrating'); $('demo-label').hidden = true; $('welcome').hidden = false;
   $('source-badge').textContent = 'No camera connected'; $('reported-fps').textContent = '—'; $('stage-hint').textContent = 'An angled camera is supported experimentally. Keep the entire scoring circle in view.';
   ctx.clearRect(0, 0, board.width, board.height); resetStats(); configureWorker(); return true;
