@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import sys
 import threading
+import time
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright, expect
 
@@ -64,7 +65,7 @@ with sync_playwright() as p:
     page.locator('#demo').click()
     expect(page.locator('#demo-label')).to_be_visible()
     expect(page.locator('#record')).to_be_disabled()
-    page.wait_for_function("document.querySelector('#disc-count').textContent === '4'", timeout=15000)
+    expect(page.locator('#disc-count')).to_have_text('4', timeout=15000)
     page.wait_for_timeout(1800)
     page.screenshot(path=str(OUT/'demo.png'), full_page=True)
     assert page.locator('#board').evaluate('(c)=>Math.abs(c.getBoundingClientRect().width/c.getBoundingClientRect().height-c.width/c.height) < 0.01')
@@ -85,7 +86,7 @@ with sync_playwright() as p:
     page.locator('#stop-source').click()
     page.locator('#connect').click()
     expect(page.locator('#source-badge')).to_contain_text('LIVE', timeout=15000)
-    page.wait_for_function("document.querySelector('#observed-fps').textContent !== '—'",timeout=15000)
+    expect(page.locator('#observed-fps')).not_to_have_text('—', timeout=15000)
     assert page.locator('#source-video').evaluate('(v)=>v.srcObject.getAudioTracks().length') == 0
     passed('fake camera opens, reports observed callbacks and requests no audio')
     page.locator('#record').click()
@@ -96,7 +97,10 @@ with sync_playwright() as p:
     page.locator('#stop-record').click()
     expect(page.locator('#clip-count')).to_have_text('1',timeout=10000)
     page.locator('.clip').first.get_by_role('button',name='Review',exact=True).click()
-    page.wait_for_function("document.querySelector('#replay-video').readyState >= 2",timeout=15000)
+    deadline = time.monotonic() + 15
+    while not page.locator('#replay-video').evaluate('(v) => v.readyState >= 2'):
+        assert time.monotonic() < deadline, 'Recorded clip did not become decodable'
+        page.wait_for_timeout(100)
     with page.expect_download() as result:
         page.locator('#download-clip').click()
     clip_path = OUT/'recorded.webm'
@@ -131,7 +135,7 @@ with sync_playwright() as p:
     mobile.goto(base,wait_until='networkidle')
     assert mobile.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
     mobile.locator('#demo').click()
-    mobile.wait_for_function("document.querySelector('#disc-count').textContent === '4'",timeout=15000)
+    expect(mobile.locator('#disc-count')).to_have_text('4', timeout=15000)
     assert mobile.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
     mobile.screenshot(path=str(OUT/'mobile.png'), full_page=True)
     passed('390 px mobile layout has no horizontal overflow and demo remains usable')
