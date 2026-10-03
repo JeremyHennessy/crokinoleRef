@@ -231,7 +231,10 @@ with sync_playwright() as p:
         assert 'INCOMPLETE' not in ap.locator('.clip').first.inner_text()
         ap.screenshot(path=str(OUT/('auto-camera-angled.png' if angled else 'auto-camera-overhead.png')),full_page=True)
         ap.locator('.clip').first.get_by_role('button',name='Review',exact=True).click()
-        ap.wait_for_function("document.querySelector('#replay-video').readyState >= 2")
+        deadline = time.monotonic() + 15
+        while not ap.locator('#replay-video').evaluate('(v) => v.readyState >= 2'):
+            assert time.monotonic() < deadline, 'Automatic clip did not become decodable'
+            ap.wait_for_timeout(100)
         assert ap.locator('#replay-video').evaluate('(v)=>v.videoWidth')==960
         with ap.expect_download() as result:ap.locator('#download-clip').click()
         auto_path=OUT/('auto-angled.webm' if angled else 'auto-overhead.webm')
