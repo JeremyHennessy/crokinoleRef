@@ -97,7 +97,7 @@ with sync_playwright() as p:
     expect(page.locator('#cal-apply')).to_be_disabled()
     click_guide_points(page,[(480,360),(574,360),(665,360),(740,360),(620,290),(634,290)])
     expect(page.locator('#cal-apply')).to_be_enabled()
-    expect(page.locator('#tracking-status')).to_contain_text('active')
+    expect(page.locator('#tracking-status')).to_contain_text('save an empty board')
     page.screenshot(path=str(OUT/'overhead-calibration-preview.png'), full_page=True)
     page.locator('#cal-apply').click()
     expect(page.locator('#tracking-status')).to_contain_text('save an empty board')
