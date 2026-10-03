@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeCalibration, scaleCalibration, suggestedScore, roundResult, captureConstraints, averageColor, detectDiscs, Tracker } from '../src/core.js';
+import { makeCalibration, makePerspectiveCalibration, homographyFromFourPoints, projectPoint, scaleCalibration, warpPerspectiveRGBA, suggestedScore, roundResult, captureConstraints, averageColor, detectDiscs, Tracker } from '../src/core.js';
 const points = [{x:150,y:150},{x:190,y:150},{x:230,y:150},{x:270,y:150},{x:200,y:200},{x:207,y:200}];
 const cal = () => makeCalibration(points, 300, 300);
 test('six-click calibration derives radii and disc size', () => { const c = cal(); assert.deepEqual(c.rings,[40,80,120]);assert.equal(c.discRadius,7); });
@@ -10,6 +10,51 @@ test('reversed rings rejected', () => assert.throws(()=>makeCalibration([points[
 test('clipped board rejected', () => assert.throws(()=>makeCalibration(points,200,200)));
 test('zero disc radius rejected', () => assert.throws(()=>makeCalibration([...points.slice(0,5),points[4]],300,300)));
 test('scaling preserves normalized geometry', () => { const c=scaleCalibration(cal(),.5);assert.deepEqual(c.rings,[20,40,60]);assert.equal(c.discRadius,3.5); });
+const perspectiveSource = [{x:158,y:42},{x:292,y:137},{x:172,y:283},{x:33,y:174}];
+const perspectiveDestination = [{x:160,y:32},{x:288,y:160},{x:160,y:288},{x:32,y:160}];
+const perspectiveToSource = homographyFromFourPoints(perspectiveDestination, perspectiveSource);
+const fromCorrected = (x,y) => projectPoint(perspectiveToSource,{x,y});
+const perspectivePoints = [
+  ...perspectiveSource,
+  fromCorrected(160,160),
+  fromCorrected(200,160),
+  fromCorrected(240,160),
+  fromCorrected(205,205),
+  fromCorrected(212,205)
+];
+test('four-point homography maps all calibration correspondences', () => {
+  const h=homographyFromFourPoints(perspectiveSource,perspectiveDestination);
+  perspectiveSource.forEach((p,i)=>{const q=projectPoint(h,p);assert.ok(Math.abs(q.x-perspectiveDestination[i].x)<1e-6);assert.ok(Math.abs(q.y-perspectiveDestination[i].y)<1e-6);});
+});
+test('angled nine-click calibration rectifies rings and disc size', () => {
+  const c=makePerspectiveCalibration(perspectivePoints,320,320);
+  assert.equal(c.mode,'perspective');
+  assert.ok(Math.abs(c.rings[0]-40)<1e-5);
+  assert.ok(Math.abs(c.rings[1]-80)<1e-5);
+  assert.ok(Math.abs(c.rings[2]-128)<1e-9);
+  assert.ok(Math.abs(c.discRadius-7)<1e-5);
+  assert.ok(c.perspective.centerResidual<1e-5);
+});
+test('angled calibration scaling keeps source-to-corrected mapping consistent', () => {
+  const c=makePerspectiveCalibration(perspectivePoints,320,320), half=scaleCalibration(c,.5);
+  const q=projectPoint(half.perspective.forward,{x:perspectiveSource[1].x/2,y:perspectiveSource[1].y/2});
+  assert.ok(Math.abs(q.x-perspectiveDestination[1].x/2)<1e-6);
+  assert.ok(Math.abs(q.y-perspectiveDestination[1].y/2)<1e-6);
+  assert.ok(Math.abs(half.discRadius-c.discRadius/2)<1e-6);
+});
+test('perspective warp samples source pixels into corrected coordinates', () => {
+  const c=makePerspectiveCalibration(perspectivePoints,320,320);
+  const data=new Uint8ClampedArray(320*320*4);
+  const target={x:205,y:205}, source=projectPoint(c.perspective.inverse,target);
+  const sx=Math.round(source.x), sy=Math.round(source.y), si=(sy*320+sx)*4;
+  data[si]=23;data[si+1]=117;data[si+2]=201;data[si+3]=255;
+  const warped=warpPerspectiveRGBA(data,320,320,c), ti=(target.y*320+target.x)*4;
+  assert.deepEqual(Array.from(warped.slice(ti,ti+4)),[23,117,201,255]);
+});
+test('bad angled calibration order is rejected instead of silently accepted', () => {
+  const bad=[perspectiveSource[0],perspectiveSource[2],perspectiveSource[1],perspectiveSource[3],...perspectivePoints.slice(4)];
+  assert.throws(()=>makePerspectiveCalibration(bad,320,320));
+});
 test('disc entirely in 15 zone gets a suggestion, not a verdict', () => assert.deepEqual(suggestedScore({x:170,y:150,r:7},cal()),{value:15,review:false}));
 test('touching inner scoring line goes lower and needs review', () => assert.deepEqual(suggestedScore({x:183,y:150,r:7},cal()),{value:10,review:true}));
 test('touching middle scoring line goes lower', () => assert.deepEqual(suggestedScore({x:223,y:150,r:7},cal()),{value:5,review:true}));
