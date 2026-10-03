@@ -77,7 +77,12 @@ export class AutoShotAnalyzer {
       const counts=[0,0];for(const d of current)if(d.team===0||d.team===1)counts[d.team]++;
       const key=counts.join(':');
       const quiet=!frameGap&&maxMotion<this.options.moveStop&&topologyAppeared===0&&topologyDisappeared===0;
-      if(quiet){
+      const initializing=previous.length===0&&current.length>0&&this.lastSettled.length===0;
+      if(initializing){
+        // The first observed board is observation one, not a "puck appeared" event.
+        // A second matching settled frame is still required before arming.
+        this.baselineKey=key;this.baselineStreak=1;this.lastSettled=current.map(cloneDisc);this.armed=false;
+      } else if(quiet){
         if(this.baselineKey===key)this.baselineStreak++;else{this.baselineKey=key;this.baselineStreak=1;}
         // Keep the most complete repeatedly observed settled board. A one-frame
         // detector dropout must not redefine the pre-shot baseline.
