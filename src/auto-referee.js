@@ -38,7 +38,7 @@ export class AutoShotAnalyzer {
   setCalibration(calibration){this.calibration=calibration||null;}
   resetRound(){
     this.active=false;this.shotNumber=0;this.twenties=[0,0];this.last=[];this.lastSettled=[];
-    this.motionFrames=0;this.stableSince=null;this.startedAt=null;this.tracks=new Map();this.hadFrameGap=false;this.contacts=[];
+    this.motionFrames=0;this.stableSince=null;this.startedAt=null;this.preDiscs=[];this.tracks=new Map();this.hadFrameGap=false;this.contacts=[];
   }
   _recordTracks(discs,time){
     for(const d of discs||[]){
@@ -65,8 +65,8 @@ export class AutoShotAnalyzer {
       if(!frameGap&&moving.length){this.motionFrames++;}else this.motionFrames=0;
       if(this.motionFrames>=1){
         this.active=true;this.shotNumber++;this.startedAt=time;this.stableSince=null;this.hadFrameGap=false;this.contacts=[];
-        this.tracks=new Map();const seed=this.lastSettled.length?this.lastSettled:previous;this._recordTracks(seed,time);this._recordTracks(current,time);
-        event={type:'shot-start',shotNumber:this.shotNumber,time,movingDiscIds:moving,preDiscs:seed.map(cloneDisc)};
+        this.tracks=new Map();const seed=this.lastSettled.length?this.lastSettled:previous;this.preDiscs=seed.map(cloneDisc);this._recordTracks(seed,time);this._recordTracks(current,time);
+        event={type:'shot-start',shotNumber:this.shotNumber,time,movingDiscIds:moving,preDiscs:this.preDiscs.map(cloneDisc)};
       } else if(!frameGap&&maxMotion<this.options.moveStop&&appeared.length===0&&disappeared.length===0) {
         this.lastSettled=current.map(cloneDisc);
       }
@@ -80,12 +80,18 @@ export class AutoShotAnalyzer {
         const twentyCandidates=[];
         const currentIds=new Set(current.map(d=>d.id));
         const limit=(this.calibration?.discRadius||12)*this.options.twentyRadiusFactor;
+        const preCounts=[0,0],currentCounts=[0,0];
+        for(const d of this.preDiscs)if(d.team===0||d.team===1)preCounts[d.team]++;
+        for(const d of current)if(d.team===0||d.team===1)currentCounts[d.team]++;
+        const missingByTeam=preCounts.map((n,i)=>Math.max(0,n-currentCounts[i]));
         for(const t of this.tracks.values()){
-          if(currentIds.has(t.id)||!t.last||t.minCenterDistance>limit||(t.team!==0&&t.team!==1))continue;
+          if(currentIds.has(t.id)||!t.last||t.minCenterDistance>limit||(t.team!==0&&t.team!==1)||missingByTeam[t.team]<1)continue;
+          const lastDistance=this.calibration?distance(t.last,this.calibration.center):Infinity;
+          if(lastDistance>limit*1.15)continue;
           const sameTeamNearCentre=current.some(d=>d.team===t.team&&this.calibration&&distance(d,this.calibration.center)<=limit*1.15);
           if(!sameTeamNearCentre)twentyCandidates.push({id:t.id,team:t.team,minCenterDistance:t.minCenterDistance,last:t.last});
         }
-        // Multiple simultaneous disappearances near the hole are ambiguous rather than invented 20s.
+        // Multiple simultaneous centre disappearances are ambiguous rather than invented 20s.
         const confirmedTwenties=!this.hadFrameGap&&twentyCandidates.length===1?twentyCandidates:[];
         for(const t of confirmedTwenties)this.twenties[t.team]++;
         const score=scoreSettledBoard(current,this.calibration,this.twenties);
