@@ -30,6 +30,59 @@ export function fitHomography(from, to) {
   if (!h.every(Number.isFinite)) throw Error('Could not fit the perspective.');
   return h;
 }
+
+function multiply3x3(a,b) {
+  const out=new Array(9).fill(0);
+  for(let r=0;r<3;r++) for(let c=0;c<3;c++) for(let k=0;k<3;k++) out[r*3+c]+=a[r*3+k]*b[k*3+c];
+  return out;
+}
+function normalizePoints(points) {
+  const center={x:points.reduce((n,p)=>n+p.x,0)/points.length,y:points.reduce((n,p)=>n+p.y,0)/points.length};
+  const mean=points.reduce((n,p)=>n+Math.hypot(p.x-center.x,p.y-center.y),0)/points.length;
+  if(!(mean>1e-9)) throw Error('Reference points overlap or are nearly in a straight line.');
+  const scale=Math.SQRT2/mean;
+  return {
+    points:points.map(p=>({x:(p.x-center.x)*scale,y:(p.y-center.y)*scale})),
+    transform:[scale,0,-scale*center.x,0,scale,-scale*center.y,0,0,1],
+    inverse:[1/scale,0,center.x,0,1/scale,center.y,0,0,1]
+  };
+}
+function solveLinearSystem(matrix, vector) {
+  const rows=matrix.map((row,i)=>[...row,vector[i]]);
+  for(let c=0;c<rows.length;c++) {
+    let pivot=c;
+    for(let r=c+1;r<rows.length;r++) if(Math.abs(rows[r][c])>Math.abs(rows[pivot][c])) pivot=r;
+    if(Math.abs(rows[pivot][c])<1e-12) throw Error('The reference marks do not define a stable perspective.');
+    [rows[c],rows[pivot]]=[rows[pivot],rows[c]];
+    const div=rows[c][c];for(let k=c;k<=rows.length;k++) rows[c][k]/=div;
+    for(let r=0;r<rows.length;r++) if(r!==c) {
+      const factor=rows[r][c];if(!factor) continue;
+      for(let k=c;k<=rows.length;k++) rows[r][k]-=factor*rows[c][k];
+    }
+  }
+  return rows.map(row=>row[rows.length]);
+}
+/** Least-squares projective fit for 4+ landmarks, normalized for numerical stability. */
+export function fitHomographyLeastSquares(from,to) {
+  if(from.length!==to.length||from.length<4||![...from,...to].every(finitePoint)) throw Error('At least four valid reference pairs are required.');
+  const nf=normalizePoints(from),nt=normalizePoints(to), ata=Array.from({length:8},()=>new Array(8).fill(0)), atb=new Array(8).fill(0);
+  for(let i=0;i<from.length;i++) {
+    const {x,y}=nf.points[i],{x:u,y:v}=nt.points[i];
+    const equations=[
+      {a:[x,y,1,0,0,0,-u*x,-u*y],b:u},
+      {a:[0,0,0,x,y,1,-v*x,-v*y],b:v}
+    ];
+    for(const eq of equations) for(let r=0;r<8;r++) {
+      atb[r]+=eq.a[r]*eq.b;
+      for(let c=0;c<8;c++) ata[r][c]+=eq.a[r]*eq.a[c];
+    }
+  }
+  const h=solveLinearSystem(ata,atb), normalized=[...h,1];
+  const denormalized=multiply3x3(nt.inverse,multiply3x3(normalized,nf.transform));
+  const scale=denormalized[8];
+  if(!Number.isFinite(scale)||Math.abs(scale)<1e-12) throw Error('Could not fit the perspective.');
+  return denormalized.map(v=>v/scale);
+}
 export function makePerspectiveCalibration(points, width, height) {
   if (points.length !== 9 || !points.every(finitePoint)) throw Error('Complete all nine reference clicks.');
   if (!(width>0 && height>0) || points.some(p=>p.x<0||p.y<0||p.x>width||p.y>height)) throw Error('Click inside the camera image.');
@@ -42,11 +95,20 @@ export function makePerspectiveCalibration(points, width, height) {
     if(Math.hypot(n.x-p.x,n.y-p.y)<8) throw Error('Quarter marks are too close together. Use four different printed quadrant marks.');
   }
   if (Math.abs(area)<width*height*.04 || !(crosses.every(v=>v>1)||crosses.every(v=>v< -1))) throw Error('Quarter marks must go around the board in order, without crossing or repeating.');
-  const imageToBoard=fitHomography(q,[{x:320,y:40},{x:600,y:320},{x:320,y:600},{x:40,y:320}]);
-  const boardToImage=invertHomography(imageToBoard), checkedCenter=projectPoint(imageToBoard,center);
-  const centerError=Math.hypot(checkedCenter.x-320,checkedCenter.y-320);
-  if(centerError>14) throw Error('The centre hole does not line up with the quarter marks. Use the actual four quadrant-line intersections, not the oval’s apparent top/left/right edges. Undo or start again.');
-  const r=p=>{const v=projectPoint(imageToBoard,p);return Math.hypot(v.x-320,v.y-320);};
+  const boardMarks=[{x:320,y:40},{x:600,y:320},{x:320,y:600},{x:40,y:320}], boardCenter={x:320,y:320};
+  const quarterOnly=fitHomography(q,boardMarks), rawCheckedCenter=projectPoint(quarterOnly,center);
+  const rawCenterError=Math.hypot(rawCheckedCenter.x-boardCenter.x,rawCheckedCenter.y-boardCenter.y);
+  // A real 45-degree webcam view includes click error and some lens distortion. A 14 px hard
+  // rejection was too strict. Reject only a gross inconsistency, then fit all five landmarks
+  // together so the independently clicked centre contributes to the board-plane solution.
+  if(rawCenterError>90) throw Error('The centre hole is far from the four quarter marks. Recheck that A–D are the actual quadrant-line intersections on the outer printed circle, in order around the board.');
+  const fitFrom=[...q,center], fitTo=[...boardMarks,boardCenter];
+  const imageToBoard=fitHomographyLeastSquares(fitFrom,fitTo), boardToImage=invertHomography(imageToBoard);
+  const anchorErrors=fitFrom.map((p,i)=>{const v=projectPoint(imageToBoard,p),t=fitTo[i];return Math.hypot(v.x-t.x,v.y-t.y);});
+  const fitRmsError=Math.sqrt(anchorErrors.reduce((n,v)=>n+v*v,0)/anchorErrors.length), fitMaxError=Math.max(...anchorErrors);
+  if(fitRmsError>30||fitMaxError>55) throw Error('The calibration landmarks disagree too much for a stable board-plane fit. Undo the least certain click or retake the image.');
+  const checkedCenter=projectPoint(imageToBoard,center), centerError=Math.hypot(checkedCenter.x-boardCenter.x,checkedCenter.y-boardCenter.y);
+  const r=p=>{const v=projectPoint(imageToBoard,p);return Math.hypot(v.x-boardCenter.x,v.y-boardCenter.y);};
   const rings=[r(inner),r(middle),280], pc=projectPoint(imageToBoard,disc), pe=projectPoint(imageToBoard,edge);
   const discRadius=Math.hypot(pc.x-pe.x,pc.y-pe.y);
   if (!(rings[0]>28 && rings[1]>rings[0]*1.25 && rings[1]<252)) throw Error('Scoring rings are out of order. Click the inner 15 line, then the middle 10 line.');
@@ -57,7 +119,7 @@ export function makePerspectiveCalibration(points, width, height) {
   }
   return {
     calibration:{center:{x:320,y:320},rings,discRadius,width:640,height:640},
-    projection:{imageToBoard,boardToImage,imageWidth:width,imageHeight:height,boardSize:640,centerCheckErrorPx:centerError,method:'four-quarter-marks-plus-independent-centre-check'}
+    projection:{imageToBoard,boardToImage,imageWidth:width,imageHeight:height,boardSize:640,centerCheckErrorPx:centerError,rawCenterCheckErrorPx:rawCenterError,anchorRmsErrorPx:fitRmsError,anchorMaxErrorPx:fitMaxError,method:'five-landmark-best-fit-with-centre-anchor'}
   };
 }
 /** Transform output pixels (possibly a small preview) to a scaled source image. */
