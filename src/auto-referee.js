@@ -88,7 +88,9 @@ export class AutoShotAnalyzer {
       if(frame.contacts?.length)this.contacts.push(...frame.contacts);
       const stable=!frameGap&&maxMotion<this.options.moveStop&&topologyAppeared===0&&topologyDisappeared===0;
       if(stable){if(this.stableSince===null)this.stableSince=time;}else this.stableSince=null;
-      if((this.stableSince!==null&&time-this.stableSince>=this.options.settleSeconds)||time-this.startedAt>=this.options.maxShotSeconds){
+      const settledReady=this.stableSince!==null&&time-this.stableSince>=this.options.settleSeconds;
+      const timedOut=time-this.startedAt>=this.options.maxShotSeconds;
+      if(settledReady||timedOut){
         const twentyCandidates=[];
         const currentIds=new Set(current.map(d=>d.id));
         const limit=(this.calibration?.discRadius||12)*this.options.twentyRadiusFactor;
@@ -103,20 +105,31 @@ export class AutoShotAnalyzer {
           const sameTeamNearCentre=current.some(d=>d.team===t.team&&this.calibration&&distance(d,this.calibration.center)<=limit*1.15);
           if(!sameTeamNearCentre)twentyCandidates.push({id:t.id,team:t.team,minCenterDistance:t.minCenterDistance,last:t.last});
         }
-        // Multiple simultaneous centre disappearances are ambiguous rather than invented 20s.
-        const confirmedTwenties=!this.hadFrameGap&&twentyCandidates.length===1?twentyCandidates:[];
+        const possibleConfirmed=!this.hadFrameGap&&!timedOut&&twentyCandidates.length===1?twentyCandidates:[];
+        const outerRadius=this.calibration?.rings?.[2]||Infinity;
+        const outOfPlay=[...this.tracks.values()].filter(t=>!currentIds.has(t.id)&&!possibleConfirmed.some(v=>v.id===t.id)&&t.last&&this.calibration&&distance(t.last,this.calibration.center)>=outerRadius-t.r*2.2);
+        const outIds=new Set(outOfPlay.map(t=>t.id));
+        const unexplainedLosses=[...this.tracks.values()].filter(t=>!currentIds.has(t.id)&&!possibleConfirmed.some(v=>v.id===t.id)&&!outIds.has(t.id)&&t.last);
+
+        // A stable-looking frame with an unexplained interior loss is not a settled board.
+        // Keep waiting for the detector to recover instead of scoring an incomplete snapshot.
+        if(settledReady&&!timedOut&&unexplainedLosses.length){
+          this.last=current;
+          return {
+            event:null,state:'moving',shotNumber:this.shotNumber,maxMotion,movingDiscIds:moving,appeared,disappeared,
+            score:null,twenties:[...this.twenties],waitingForRecovery:true
+          };
+        }
+
+        const confirmedTwenties=timedOut?[]:possibleConfirmed;
         for(const t of confirmedTwenties)this.twenties[t.team]++;
         const score=scoreSettledBoard(current,this.calibration,this.twenties);
-        const outerRadius=this.calibration?.rings?.[2]||Infinity;
-        const outOfPlay=[...this.tracks.values()].filter(t=>!currentIds.has(t.id)&&!confirmedTwenties.some(v=>v.id===t.id)&&t.last&&this.calibration&&distance(t.last,this.calibration.center)>=outerRadius-t.r*2.2);
-        const outIds=new Set(outOfPlay.map(t=>t.id));
-        const unexplainedLosses=[...this.tracks.values()].filter(t=>!currentIds.has(t.id)&&!confirmedTwenties.some(v=>v.id===t.id)&&!outIds.has(t.id)&&t.last);
         let confidence=1;
         if(this.hadFrameGap)confidence-=.38;
-        if(unexplainedLosses.length)confidence-=Math.min(.35,unexplainedLosses.length*.12);
+        if(unexplainedLosses.length)confidence-=Math.min(.45,unexplainedLosses.length*.15);
         if(score.review)confidence-=.12;
         if(twentyCandidates.length>1)confidence-=.25;
-        if(time-this.startedAt>=this.options.maxShotSeconds)confidence-=.18;
+        if(timedOut)confidence-=.45;
         confidence=Math.max(0,Math.min(1,confidence));
         event={
           type:'shot-end',shotNumber:this.shotNumber,time,startedAt:this.startedAt,duration:time-this.startedAt,
@@ -124,8 +137,8 @@ export class AutoShotAnalyzer {
           twentyCandidates:twentyCandidates.map(v=>({id:v.id,team:v.team,minCenterDistance:v.minCenterDistance})),
           outOfPlay:outOfPlay.map(v=>({id:v.id,team:v.team,last:v.last})),
           unexplainedLosses:unexplainedLosses.map(v=>({id:v.id,team:v.team,last:v.last})),
-          contacts:this.contacts.slice(0,300),hadFrameGap:this.hadFrameGap,
-          confidence,applyScore:confidence>=.62
+          contacts:this.contacts.slice(0,300),hadFrameGap:this.hadFrameGap,timedOut,
+          confidence,applyScore:!timedOut&&!unexplainedLosses.length&&confidence>=.62
         };
         this.active=false;this.stableSince=null;this.startedAt=null;this.motionFrames=0;this.tracks=new Map();this.contacts=[];
         this.lastSettled=current.map(cloneDisc);
