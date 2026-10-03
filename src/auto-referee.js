@@ -81,7 +81,7 @@ export class AutoShotAnalyzer {
         if(this.baselineKey===key)this.baselineStreak++;else{this.baselineKey=key;this.baselineStreak=1;}
         // Keep the most complete repeatedly observed settled board. A one-frame
         // detector dropout must not redefine the pre-shot baseline.
-        if(this.baselineStreak>=3&&current.length>=this.lastSettled.length){
+        if(this.baselineStreak>=2&&current.length>=this.lastSettled.length){
           this.lastSettled=current.map(cloneDisc);this.armed=true;
         }
       } else if(topologyAppeared||topologyDisappeared){
