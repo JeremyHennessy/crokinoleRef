@@ -56,8 +56,10 @@ test('frame gap prevents a disappearing centre puck from being auto-awarded as a
   a.update(frame([d(1,0,158,150)],{frameGap:true}),.12);
   a.update(frame([]),.16);
   a.update(frame([]),.25);
-  const end=a.update(frame([]),.70).event;
+  assert.equal(a.update(frame([]),.70).event,null);
+  const end=a.update(frame([]),10.2).event;
   assert.equal(end.type,'shot-end');
+  assert.equal(end.timedOut,true);
   assert.equal(end.twentiesAdded.length,0);
   assert.equal(end.applyScore,false);
 });
@@ -83,10 +85,30 @@ test('multiple centre disappearances are review candidates, not invented 20s',()
   a.update(frame([d(1,0,158,150),d(2,1,158,160)]),.08);
   a.update(frame([]),.12);
   a.update(frame([]),.22);
-  const end=a.update(frame([]),.68).event;
+  assert.equal(a.update(frame([]),.68).event,null);
+  const end=a.update(frame([]),10.2).event;
+  assert.equal(end.type,'shot-end');
+  assert.equal(end.timedOut,true);
   assert.equal(end.twentyCandidates.length,2);
   assert.equal(end.twentiesAdded.length,0);
   assert.equal(end.applyScore,false);
+});
+
+test('temporarily missing interior puck delays score until it reappears',()=>{
+  const a=new AutoShotAnalyzer(calibration,{settleSeconds:.3,maxShotSeconds:3});
+  a.update(frame([d(1,0,220,150),d(2,1,200,150)]),0);
+  a.update(frame([d(1,0,220,150),d(2,1,200,150)]),.04);
+  a.update(frame([d(1,0,200,150),d(2,1,200,150)]),.08);
+  a.update(frame([d(1,0,190,150)]),.12);
+  a.update(frame([d(1,0,190,150)]),.20);
+  assert.equal(a.update(frame([d(1,0,190,150)]),.55).event,null);
+  a.update(frame([d(1,0,190,150),d(2,1,200,150)]),.60);
+  a.update(frame([d(1,0,190,150),d(2,1,200,150)]),.70);
+  const end=a.update(frame([d(1,0,190,150),d(2,1,200,150)]),1.05).event;
+  assert.equal(end.type,'shot-end');
+  assert.equal(end.timedOut,false);
+  assert.equal(end.applyScore,true);
+  assert.deepEqual(end.score.totals,[10,10]);
 });
 
 test('shot analyzer never emits a legal or foul verdict',()=>{
