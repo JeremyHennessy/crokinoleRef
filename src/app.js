@@ -1,10 +1,10 @@
-import { VERSION, clamp, makeCalibration, scaleCalibration, roundResult, captureConstraints, averageColor } from './core.js';
+import { VERSION, clamp, makeCalibration, makePerspectiveCalibration, projectPoint, scaleCalibration, roundResult, captureConstraints, averageColor } from './core.js';
 const $ = id => document.getElementById(id);
 const board = $('board'), ctx = board.getContext('2d');
 const video = $('source-video'), raw = document.createElement('canvas'), rawCtx = raw.getContext('2d', { willReadFrequently: true });
 const small = document.createElement('canvas'), smallCtx = small.getContext('2d', { willReadFrequently: true });
 const MB = 1024 * 1024, MAX_CLIP = 64 * MB, MAX_TOTAL = 128 * MB;
-const state = { mode: 'idle', token: 0, generation: 0, stream: null, sourceURL: null, callback: null, raf: null, calibration: null, background: null, colors: [null, null], discs: [], contacts: [], calibrationPoints: null, sampleTeam: null, inflight: false, time: 0, lastTime: null, gaps: [], observed: 0, analysed: 0, statStart: performance.now(), fps: 0, analysisFps: 0, clips: [], selected: null, recording: null, settings: {}, names: ['Team A', 'Team B'], scores: [0, 0], totals: [0, 0], rounds: [], undo: [], round: 1, demoStart: 0 };
+const state = { mode: 'idle', token: 0, generation: 0, stream: null, sourceURL: null, callback: null, raf: null, calibration: null, pendingCalibration: null, background: null, colors: [null, null], discs: [], contacts: [], calibrationPoints: null, sampleTeam: null, inflight: false, time: 0, lastTime: null, gaps: [], observed: 0, analysed: 0, statStart: performance.now(), fps: 0, analysisFps: 0, clips: [], selected: null, recording: null, settings: {}, names: ['Team A', 'Team B'], scores: [0, 0], totals: [0, 0], rounds: [], undo: [], round: 1, demoStart: 0 };
 let worker;
 try {
   worker = new Worker(new URL('./vision-worker.js', import.meta.url), { type: 'module' });
@@ -30,22 +30,27 @@ function configSnapshot() { return { calibration: state.calibration, colors: sta
 function configureWorker() {
   state.generation++; state.inflight = false; state.discs = []; state.contacts = []; $('disc-count').textContent = '—';
   const scale = small.width / board.width;
-  worker?.postMessage({ type: 'configure', generation: state.generation, calibration: state.calibration ? scaleCalibration(state.calibration, scale) : null, background: state.background, colors: state.colors, tolerance: +$('tolerance').value });
+  worker?.postMessage({ type: 'configure', generation: state.generation, calibration: state.calibration ? scaleCalibration(state.calibration, scale) : null, background: state.background, colors: state.colors, tolerance: +$('tolerance').value, width: small.width, height: small.height });
   $('contact-status').textContent = 'First-contact order is not verified. Proximity candidates are not referee decisions.';
   updateControls();
 }
 function readyToTrack() { return !!(worker && state.calibration && state.background && state.colors.every(Boolean)); }
 function updateControls() {
-  const active = state.mode !== 'idle', busy = !!state.recording, calibrating = !!state.calibrationPoints;
+  const active = state.mode !== 'idle', busy = !!state.recording, calibrating = Array.isArray(state.calibrationPoints), pending = !!state.pendingCalibration;
   $('stop-source').disabled = !active || busy; $('connect').disabled = busy;
   $('record').disabled = state.mode !== 'camera' || busy || calibrating || state.sampleTeam !== null || !window.MediaRecorder;
   $('record').hidden = busy; $('stop-record').hidden = !busy; $('record-label').hidden = !busy;
-  $('calibrate').disabled = !active || busy; $('background').disabled = !state.calibration || busy || calibrating;
+  $('calibrate').disabled = !active || busy || calibrating || state.sampleTeam !== null;
+  $('background').disabled = !state.calibration || busy || calibrating;
   $('sample-a').disabled = !state.background || busy || calibrating; $('sample-b').disabled = !state.background || busy || calibrating;
   ['camera', 'capture-mode', 'import-video', 'import-button', 'tolerance', 'refresh-cameras'].forEach(id => { $(id).disabled = busy; });
-  $('demo').disabled = busy; $('cancel-calibrate').hidden = !calibrating && state.sampleTeam === null;
+  $('demo').disabled = busy;
+  $('cancel-calibrate').hidden = !calibrating && state.sampleTeam === null;
+  $('undo-calibrate').hidden = !calibrating || state.calibrationPoints.length === 0;
+  $('restart-calibrate').hidden = !calibrating;
+  $('accept-calibrate').hidden = !pending;
   $('tracking-status').textContent = !worker ? 'Tracking unavailable in this browser' : readyToTrack() ? 'Experimental tracking active · human review required' : !state.calibration ? 'Waiting for calibration' : !state.background ? 'Next: save an empty board' : 'Next: sample both team colours';
-  $('calibration-status').textContent = state.calibration ? `${state.mode === 'demo' ? 'Demo geometry' : 'Calibrated for this view'} · ${Math.round(state.calibration.discRadius * 2)} px disc diameter` : 'Not calibrated';
+  $('calibration-status').textContent = pending ? 'Alignment preview ready · verify the guides' : state.calibration ? `${state.mode === 'demo' ? 'Demo geometry' : state.calibration.perspective ? 'Angled view corrected' : 'Calibrated for this view'} · ${Math.round(state.calibration.discRadius * 2)} px corrected disc diameter` : 'Not calibrated';
   $('file-controls').hidden = state.mode !== 'file';
   $('record-hint').textContent = state.mode === 'demo' ? 'Demo is synthetic. Connect a camera to record real evidence.' : !window.MediaRecorder ? 'Recording is unavailable in this browser. You can still import clips.' : 'Start a clip before shooting. No pre-roll. Clips stop after 30 seconds.';
 }
@@ -59,9 +64,9 @@ function stopSource() {
   state.stream?.getTracks().forEach(t => t.stop()); state.stream = null;
   video.pause(); video.srcObject = null; video.removeAttribute('src'); video.load();
   if (state.sourceURL) URL.revokeObjectURL(state.sourceURL); state.sourceURL = null;
-  state.mode = 'idle'; state.calibration = state.background = state.calibrationPoints = null; state.sampleTeam = null; state.colors = [null, null]; state.settings = {};
+  state.mode = 'idle'; state.calibration = state.pendingCalibration = state.background = state.calibrationPoints = null; state.sampleTeam = null; state.colors = [null, null]; state.settings = {};
   $('stage').classList.remove('calibrating'); $('demo-label').hidden = true; $('welcome').hidden = false;
-  $('source-badge').textContent = 'No camera connected'; $('reported-fps').textContent = '—'; $('stage-hint').textContent = 'Mount the camera directly overhead, with the whole board in view.';
+  $('source-badge').textContent = 'No camera connected'; $('reported-fps').textContent = '—'; $('stage-hint').textContent = 'A fixed angled view is fine. Keep the whole scoring circle and its four quadrant-line intersections visible.'; $('calibration-guide').hidden = true;
   ctx.clearRect(0, 0, board.width, board.height); resetStats(); configureWorker(); return true;
 }
 function resize(width, height) {
@@ -106,7 +111,7 @@ async function connect() {
       if (state.recording) await finishClip(); stopSource(); notify('Camera disconnected. Any completed clip remains in this tab.', true);
     });
     configureWorker(); scheduleVideo(token); await listCameras();
-    notify('Camera connected. Calibrate the board, then save an empty-board view and sample the disc colours.');
+    notify('Camera connected. An angled view around 45° is supported. Calibrate the board, verify the alignment guides, then save an empty-board view and sample the disc colours.');
   } catch (error) {
     stream?.getTracks().forEach(t => t.stop());
     if (token !== state.token) return;
@@ -145,35 +150,106 @@ function processFrame(time, now) {
   }
   if (state.mode === 'file' && Number.isFinite(video.duration)) { $('file-seek').value = String(video.currentTime / video.duration * 1000); $('file-time').textContent = formatTime(video.currentTime); }
 }
-function drawOverlay() {
-  if (!$('overlays').checked || !state.calibration) return;
-  const c = state.calibration; ctx.save(); ctx.strokeStyle = '#faf3c69e'; ctx.lineWidth = Math.max(1, board.width / 600); ctx.setLineDash([7, 7]);
-  for (const r of c.rings) { ctx.beginPath(); ctx.arc(c.center.x, c.center.y, r, 0, Math.PI * 2); ctx.stroke(); }
-  ctx.setLineDash([]); const scale = board.width / small.width;
-  for (const d of state.discs) {
-    const x = d.x * scale, y = d.y * scale, r = d.r * scale;
-    ctx.strokeStyle = d.team === 0 ? '#a0ddf3' : '#f7b2a1'; ctx.lineWidth = 2 * scale;
-    ctx.beginPath(); ctx.arc(x, y, r + 3 * scale, 0, Math.PI * 2); ctx.stroke();
-    ctx.font = `bold ${12 * scale}px system-ui`; ctx.fillStyle = '#fff'; ctx.strokeStyle = '#183b36'; ctx.lineWidth = 3 * scale;
-    const label = `${d.team === 0 ? 'A' : 'B'}${d.id}`; ctx.strokeText(label, x + r + 6, y); ctx.fillText(label, x + r + 6, y);
+function traceCircle(calibration, x, y, radius, segments = 96) {
+  ctx.beginPath();
+  for (let i = 0; i <= segments; i++) {
+    const angle = i / segments * Math.PI * 2;
+    const corrected = { x: x + Math.cos(angle) * radius, y: y + Math.sin(angle) * radius };
+    const p = calibration.perspective ? projectPoint(calibration.perspective.inverse, corrected) : corrected;
+    if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+  }
+  ctx.closePath();
+}
+function drawOverlay(calibration = state.calibration, includeDiscs = true) {
+  if (!$('overlays').checked || !calibration) return;
+  const c = calibration; ctx.save(); ctx.strokeStyle = '#faf3c69e'; ctx.lineWidth = Math.max(1, board.width / 600); ctx.setLineDash([7, 7]);
+  for (const r of c.rings) { traceCircle(c, c.center.x, c.center.y, r); ctx.stroke(); }
+  ctx.setLineDash([]);
+  if (includeDiscs) {
+    const scale = board.width / small.width;
+    for (const d of state.discs) {
+      const x = d.x * scale, y = d.y * scale, r = d.r * scale;
+      ctx.strokeStyle = d.team === 0 ? '#a0ddf3' : '#f7b2a1'; ctx.lineWidth = 2 * scale;
+      traceCircle(c, x, y, r + 3 * scale, 28); ctx.stroke();
+      const centre = c.perspective ? projectPoint(c.perspective.inverse, { x, y }) : { x, y };
+      ctx.font = `bold ${12 * scale}px system-ui`; ctx.fillStyle = '#fff'; ctx.strokeStyle = '#183b36'; ctx.lineWidth = 3 * scale;
+      const label = `${d.team === 0 ? 'A' : 'B'}${d.id}`; ctx.strokeText(label, centre.x + 8, centre.y); ctx.fillText(label, centre.x + 8, centre.y);
+    }
   }
   ctx.restore();
 }
-const calibrationSteps = ['Click the centre of the 20 hole.', 'Click the 15-point circle line (not a peg).', 'Click the 10-point circle line.', 'Click the outer 5-point / shooting line.', 'Click the centre of a disc on the board.', 'Click the outside edge of that same disc.'];
+const calibrationSteps = [
+  { title: 'Far-side outer intersection', tip: 'Click where a straight quadrant divider meets the OUTER 5-point / shooting circle on the far side of the board.' },
+  { title: 'Next outer intersection clockwise', tip: 'Follow that same outer printed circle clockwise to the next quadrant-divider intersection and click the line crossing.' },
+  { title: 'Opposite outer intersection', tip: 'Continue clockwise to the third quadrant-divider / outer-circle intersection, opposite your first click.' },
+  { title: 'Last outer intersection', tip: 'Continue clockwise to the fourth and final quadrant-divider / outer-circle intersection.' },
+  { title: 'Centre of the 20 hole', tip: 'Click the middle of the 20-point hole, not its rim. This checks whether the perspective correction is geometrically consistent.' },
+  { title: '15 / 10 scoring boundary', tip: 'Click the printed circle that separates the 15-point area from the 10-point area. Avoid clicking a peg.' },
+  { title: '10 / 5 scoring boundary', tip: 'Click the next printed scoring circle outward, separating the 10-point and 5-point areas.' },
+  { title: 'Centre of one disc', tip: 'Place one disc on a clear part of the board, preferably near the middle. Click the centre of that disc.' },
+  { title: 'Edge of that same disc', tip: 'Click the visible outside edge of the SAME disc. Use the solid disc edge, not its shadow.' }
+];
+function updateCalibrationGuide() {
+  const guide = $('calibration-guide'), points = state.calibrationPoints;
+  guide.hidden = !Array.isArray(points);
+  if (!Array.isArray(points)) return;
+  const pending = !!state.pendingCalibration;
+  const index = Math.min(points.length, calibrationSteps.length - 1);
+  $('calibration-target').textContent = pending ? 'Alignment check' : `Click ${index + 1} of 9 · ${calibrationSteps[index].title}`;
+  $('calibration-tip').textContent = pending
+    ? 'Check the three dashed guides against the printed scoring circles across the whole board. If they line up, use this calibration. If not, undo clicks or restart.'
+    : calibrationSteps[index].tip;
+  document.querySelectorAll('[data-cal-step]').forEach((row, i) => {
+    row.classList.toggle('done', i < points.length);
+    row.classList.toggle('active', !pending && i === points.length);
+  });
+}
+function drawCalibrationFrame() {
+  ctx.drawImage(raw, 0, 0);
+  if (state.pendingCalibration) drawOverlay(state.pendingCalibration, false);
+  const points = state.calibrationPoints || [];
+  ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `bold ${Math.max(12, board.width / 70)}px system-ui`;
+  points.forEach((p, i) => {
+    const r = Math.max(8, board.width / 100);
+    ctx.fillStyle = '#efce79'; ctx.strokeStyle = '#173d37'; ctx.lineWidth = Math.max(2, board.width / 480);
+    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#173d37'; ctx.fillText(String(i + 1), p.x, p.y);
+  });
+  ctx.restore();
+}
 function startCalibration() {
   if (state.mode === 'idle' || state.recording) return;
-  state.calibrationPoints = []; state.sampleTeam = null; $('stage').classList.add('calibrating');
-  ctx.drawImage(raw, 0, 0); $('stage-hint').textContent = `1 / 6 · ${calibrationSteps[0]} View frozen.`; updateControls();
+  state.calibrationPoints = []; state.pendingCalibration = null; state.sampleTeam = null; $('stage').classList.add('calibrating');
+  drawCalibrationFrame(); updateCalibrationGuide();
+  $('stage-hint').textContent = `1 / 9 · ${calibrationSteps[0].title}. View frozen while you click.`; updateControls();
+}
+function undoCalibration() {
+  if (!Array.isArray(state.calibrationPoints) || !state.calibrationPoints.length) return;
+  state.pendingCalibration = null; state.calibrationPoints.pop(); drawCalibrationFrame(); updateCalibrationGuide();
+  const index = state.calibrationPoints.length;
+  $('stage-hint').textContent = `${index + 1} / 9 · ${calibrationSteps[index].title}. Previous click removed.`; updateControls();
+}
+function restartCalibration() {
+  if (!Array.isArray(state.calibrationPoints)) return;
+  state.calibrationPoints = []; state.pendingCalibration = null; drawCalibrationFrame(); updateCalibrationGuide();
+  $('stage-hint').textContent = `1 / 9 · ${calibrationSteps[0].title}. Calibration restarted.`; updateControls();
+}
+function acceptCalibration() {
+  if (!state.pendingCalibration) return;
+  state.calibration = state.pendingCalibration; state.pendingCalibration = null; state.calibrationPoints = null;
+  state.background = null; state.colors = [null, null]; $('stage').classList.remove('calibrating'); $('calibration-guide').hidden = true;
+  configureWorker(); ctx.drawImage(raw, 0, 0); drawOverlay();
+  $('stage-hint').textContent = 'Angled-view geometry saved. Clear every disc and hand, then save the empty board.';
+  notify('Perspective calibration accepted. The tracking worker now rectifies the angled camera image before detection. Recalibrate if the camera or board moves.');
 }
 function cancelCalibration() {
-  state.calibrationPoints = null; state.sampleTeam = null; $('stage').classList.remove('calibrating');
+  state.calibrationPoints = null; state.pendingCalibration = null; state.sampleTeam = null; $('stage').classList.remove('calibrating'); $('calibration-guide').hidden = true;
   $('stage-hint').textContent = 'Setup cancelled. Existing calibration is unchanged.'; configureWorker();
-  if (state.mode === 'file' && video.paused) { ctx.drawImage(raw, 0, 0); drawOverlay(); }
+  if (state.mode !== 'idle') { ctx.drawImage(raw, 0, 0); drawOverlay(); }
 }
 board.addEventListener('click', event => {
   if (!state.calibrationPoints && state.sampleTeam === null) return;
   const rect = board.getBoundingClientRect();
-  // The canvas is rendered at its intrinsic aspect ratio; no CSS crop/mirroring.
   const p = { x: (event.clientX - rect.left) * board.width / rect.width, y: (event.clientY - rect.top) * board.height / rect.height };
   if (state.sampleTeam !== null) {
     const team = state.sampleTeam, image = rawCtx.getImageData(0, 0, raw.width, raw.height);
@@ -183,17 +259,24 @@ board.addEventListener('click', event => {
     state.colors[team] = color; state.sampleTeam = null; $('stage').classList.remove('calibrating');
     $('stage-hint').textContent = `Team ${team === 0 ? 'A' : 'B'} colour sampled. Tracking is experimental.`; configureWorker(); return;
   }
+  if (state.pendingCalibration || state.calibrationPoints.length >= 9) return;
   state.calibrationPoints.push(p);
-  ctx.fillStyle = '#efce79'; ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill();
   const n = state.calibrationPoints.length;
-  if (n < 6) { $('stage-hint').textContent = `${n + 1} / 6 · ${calibrationSteps[n]} View frozen.`; return; }
+  if (n < 9) {
+    drawCalibrationFrame(); updateCalibrationGuide();
+    $('stage-hint').textContent = `${n + 1} / 9 · ${calibrationSteps[n].title}. View frozen.`; updateControls(); return;
+  }
   try {
-    const c = makeCalibration(state.calibrationPoints, board.width, board.height);
-    state.calibration = c; state.background = null; state.colors = [null, null];
-    $('stage-hint').textContent = 'Geometry set. Clear all discs and hands, then save the empty board.';
-    notify('Calibration saved for this view. Recalibrate whenever the camera or board moves. Perspective correction is not included.');
-  } catch (error) { notify(error.message, true); }
-  state.calibrationPoints = null; $('stage').classList.remove('calibrating'); configureWorker(); ctx.drawImage(raw, 0, 0); drawOverlay();
+    state.pendingCalibration = makePerspectiveCalibration(state.calibrationPoints, board.width, board.height);
+    drawCalibrationFrame(); updateCalibrationGuide();
+    $('stage-hint').textContent = 'Alignment check · dashed guides should follow all three printed scoring circles. Nothing is saved until you press Use this calibration.';
+    notify('Calibration preview ready. Check the dashed scoring circles across the full board before accepting it.');
+  } catch (error) {
+    state.calibrationPoints.pop(); state.pendingCalibration = null; drawCalibrationFrame(); updateCalibrationGuide();
+    $('stage-hint').textContent = 'Calibration check failed. Correct the last click, undo farther if needed, or restart.';
+    notify(error.message, true);
+  }
+  updateControls();
 });
 function saveBackground() {
   if (!state.calibration || state.recording) return;
@@ -202,7 +285,7 @@ function saveBackground() {
 }
 function sampleTeam(team) {
   if (!state.background || state.recording) return;
-  state.sampleTeam = team; state.calibrationPoints = null; ctx.drawImage(raw, 0, 0); $('stage').classList.add('calibrating');
+  state.sampleTeam = team; state.calibrationPoints = null; state.pendingCalibration = null; $('calibration-guide').hidden = true; ctx.drawImage(raw, 0, 0); $('stage').classList.add('calibrating');
   $('stage-hint').textContent = `Click the solid centre of a TEAM ${team === 0 ? 'A' : 'B'} disc. View frozen.`; updateControls();
 }
 function circle(x, y, r, fill, stroke = null) { rawCtx.beginPath(); rawCtx.arc(x, y, r, 0, Math.PI * 2); rawCtx.fillStyle = fill; rawCtx.fill(); if (stroke) { rawCtx.strokeStyle = stroke; rawCtx.lineWidth = 2; rawCtx.stroke(); } }
@@ -212,6 +295,7 @@ function paintDemo(t, empty = false) {
   for (const r of [185, 94]) circle(480, 360, r, '#dfc594', '#a48453');
   for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; circle(480 + Math.cos(a) * 94, 360 + Math.sin(a) * 94, 5, '#4a3929'); }
   circle(480, 360, 17, '#483927'); circle(480, 360, 12, '#302c22');
+  rawCtx.strokeStyle = '#a48453'; rawCtx.lineWidth = 2; for (const a of [0, Math.PI / 2, Math.PI, Math.PI * 1.5]) { rawCtx.beginPath(); rawCtx.moveTo(480, 360); rawCtx.lineTo(480 + Math.cos(a) * 280, 360 + Math.sin(a) * 280); rawCtx.stroke(); }
   rawCtx.fillStyle = '#886d48'; rawCtx.font = '16px Georgia'; rawCtx.textAlign = 'center'; rawCtx.fillText('5', 690, 363); rawCtx.fillText('10', 620, 363); rawCtx.fillText('15', 545, 363);
   if (empty) return;
   const a = [46, 113, 143], b = [168, 64, 54];
@@ -280,7 +364,7 @@ async function importVideo(file) {
     $('welcome').hidden = true; $('source-badge').textContent = 'LOCAL VIDEO · not live'; $('reported-fps').textContent = 'Unknown';
     rawCtx.drawImage(video, 0, 0); ctx.drawImage(raw, 0, 0);
     addClip(file, { title: file.name, originalName: file.name, source: 'import', duration: Number.isFinite(video.duration) ? video.duration : null, complete: null, configuration: null });
-    configureWorker(); scheduleVideo(token); notify('Local video opened without upload. Use Play / pause, then calibrate and sample a suitable scene. Imported clip analysis is not saved to the shot log in v0.1.');
+    configureWorker(); scheduleVideo(token); notify('Local video opened without upload. Use Play / pause, then calibrate and sample a suitable scene. Imported clip analysis is not saved to the shot log in v0.2.');
   } catch (error) { if (token === state.token) { stopSource(); notify(error.message, true); } }
 }
 function renderClips() {
@@ -311,7 +395,7 @@ function openReplay(id) {
 }
 function download(blob, name) { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 15000); }
 function exportSession() {
-  const payload = { schemaVersion: 1, appVersion: VERSION, exportedAt: new Date().toISOString(), automaticVerdictsEnabled: false, activeConfiguration: configSnapshot(), match: { names: state.names, mode: $('score-mode').value, scores: state.scores, totals: state.totals, round: state.round, rounds: state.rounds }, clips: state.clips.map(({ blob, url, ...c }) => ({ ...c, videoIncluded: false, videoMime: blob.type, videoBytes: blob.size })), limitations: ['No automatic first-contact or foul decisions.', 'Proximity is not proof of impact.', 'Calibration requires a near-vertical view; no perspective correction.', 'Video must be exported separately.', 'Observed callbacks are not a sensor-frame guarantee.'] };
+  const payload = { schemaVersion: 1, appVersion: VERSION, exportedAt: new Date().toISOString(), automaticVerdictsEnabled: false, activeConfiguration: configSnapshot(), match: { names: state.names, mode: $('score-mode').value, scores: state.scores, totals: state.totals, round: state.round, rounds: state.rounds }, clips: state.clips.map(({ blob, url, ...c }) => ({ ...c, videoIncluded: false, videoMime: blob.type, videoBytes: blob.size })), limitations: ['No automatic first-contact or foul decisions.', 'Proximity is not proof of impact.', 'Perspective correction depends on careful calibration and cannot recover occluded contacts.', 'Video must be exported separately.', 'Observed callbacks are not a sensor-frame guarantee.'] };
   download(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), `crokinole-match-${new Date().toISOString().slice(0, 10)}.json`);
 }
 function saveMatch() { try { localStorage.setItem('crokinole-ref-match-v1', JSON.stringify({ names: state.names, scores: state.scores, totals: state.totals, rounds: state.rounds, round: state.round, mode: $('score-mode').value })); } catch { notify('Browser storage is unavailable. Export the match log before closing.', true); } }
@@ -346,7 +430,7 @@ function renderScore() {
   for (const r of [...state.rounds].reverse().slice(0, 10)) { const row = document.createElement('div'); row.className = 'round-entry'; row.textContent = `Round ${r.round}: ${r.scores?.join(' – ')} → awarded ${r.awarded?.join(' – ')}`; $('round-history').append(row); }
 }
 $('connect').onclick = connect; $('refresh-cameras').onclick = listCameras; $('stop-source').onclick = stopSource; $('demo').onclick = startDemo;
-$('calibrate').onclick = startCalibration; $('cancel-calibrate').onclick = cancelCalibration; $('background').onclick = saveBackground;
+$('calibrate').onclick = startCalibration; $('cancel-calibrate').onclick = cancelCalibration; $('undo-calibrate').onclick = undoCalibration; $('restart-calibrate').onclick = restartCalibration; $('accept-calibrate').onclick = acceptCalibration; $('background').onclick = saveBackground;
 $('sample-a').onclick = () => sampleTeam(0); $('sample-b').onclick = () => sampleTeam(1);
 $('tolerance').oninput = () => { $('tolerance-value').value = $('tolerance').value; configureWorker(); };
 $('overlays').onchange = () => { if (state.mode !== 'idle') { ctx.drawImage(raw, 0, 0); drawOverlay(); } };
