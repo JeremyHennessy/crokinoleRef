@@ -92,3 +92,24 @@ test('a new shooting puck on an occupied board triggers and enters the pre-shot 
   const e=a.update({discs:[old,{id:2,team:1,x:655,y:390,r:14}]},.12).event;
   assert.equal(e.type,'shot-start');assert.equal(e.preDiscs.length,2);
 });
+
+for(const fps of [20,30,60])test(`gentle shot starts and settles once at ${fps} fps`,()=>{
+  const a=new AutoShotAnalyzer(c);let starts=0,ends=[];
+  for(let f=0;f<fps*5;f++){
+    const time=f/fps,y=428-Math.max(0,Math.min(time-1,2))*22;
+    const r=a.update({discs:[{id:1,team:0,x:480,y,r:14}],frameGap:false},time);
+    if(r.event?.type==='shot-start')starts++;
+    if(r.event?.type==='shot-end')ends.push(r.event);
+  }
+  assert.equal(starts,1);assert.equal(ends.length,1);
+  assert.ok(ends[0].time>=3,'must not settle while slow puck is still moving');
+  assert.equal(ends[0].applyScore,true);assert.deepEqual(ends[0].score.totals,[15,0]);
+});
+test('bounded subpixel jitter does not accumulate into a shot',()=>{
+  const a=new AutoShotAnalyzer(c);let events=0;
+  for(let f=0;f<180;f++){
+    const r=a.update({discs:[{id:1,team:0,x:600+Math.sin(f)*.4,y:360+Math.cos(f)*.4,r:14}]},f/60);
+    if(r.event)events++;
+  }
+  assert.equal(events,0);
+});

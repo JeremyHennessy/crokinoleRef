@@ -50,7 +50,7 @@ export class AutoShotAnalyzer {
   }
   setCalibration(calibration){this.calibration=calibration||null;}
   resetRound(){
-    this.active=false;this.shotNumber=0;this.twenties=[0,0];this.last=[];this.lastSettled=[];
+    this.active=false;this.shotNumber=0;this.twenties=[0,0];this.last=[];this.lastSettled=[];this.motionAnchor=[];
     this.motionFrames=0;this.stableSince=null;this.startedAt=null;this.preDiscs=[];this.tracks=new Map();this.hadFrameGap=false;this.hadObstruction=false;this.contacts=[];this.armed=false;this.baselineKey='';this.baselineStreak=0;this.entryPending=false;this.requireEmpty=false;
   }
   _recordTracks(discs,time){
@@ -67,13 +67,17 @@ export class AutoShotAnalyzer {
     const current=(frame.discs||[]).map(cloneDisc),previous=this.last;
     const prevBy=new Map(previous.map(d=>[d.id,d])),curBy=new Map(current.map(d=>[d.id,d]));
     const matched=geometricPairs(previous,current);
-    const maxMotion=matched.length?Math.max(...matched.map(v=>v.delta)):0;
-    const moving=matched.filter(v=>v.delta>=this.options.moveStart).map(v=>v.d.id);
+    // Accumulate displacement from a fixed nearby anchor, not distance per frame.
+    // This detects gentle shots consistently at 20/30/60 fps without summing jitter.
+    const anchored=geometricPairs(this.motionAnchor.length?this.motionAnchor:previous,current);
+    const maxMotion=anchored.length?Math.max(...anchored.map(v=>v.delta)):0;
+    const moving=anchored.filter(v=>v.delta>=this.options.moveStart).map(v=>v.d.id);
     const appeared=current.filter(d=>!prevBy.has(d.id)).map(d=>d.id);
     const disappeared=previous.filter(d=>!curBy.has(d.id)).map(d=>d.id);
     const topologyAppeared=Math.max(0,current.length-matched.length),topologyDisappeared=Math.max(0,previous.length-matched.length);
     const frameGap=!!frame.frameGap;
     const obstructed=!!frame.viewObstructed;
+    if(!this.motionAnchor.length||topologyAppeared||topologyDisappeared||frameGap||maxMotion>=(this.active?this.options.moveStop:this.options.moveStart))this.motionAnchor=current.map(cloneDisc);
     if(this.requireEmpty){
       if(current.length===0&&!frameGap&&!obstructed){this.baselineStreak++;}else this.baselineStreak=0;
       if(this.baselineStreak>=3){this.requireEmpty=false;this.lastSettled=[];this.armed=true;}

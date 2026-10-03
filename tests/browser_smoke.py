@@ -196,6 +196,7 @@ with sync_playwright() as p:
         ac=browser.new_context(viewport={'width':1440,'height':1100},accept_downloads=True)
         ap=ac.new_page()
         ap.on('pageerror',lambda e:errors.append(str(e)))
+        ap.on('dialog',lambda d:d.accept())
         ap.add_init_script((ROOT/'tests/synthetic_camera.js').read_text())
         ap.goto(base,wait_until='networkidle')
         ap.evaluate('(angled)=>{window.syntheticCamera.angled=angled;}',angled)
@@ -230,7 +231,19 @@ with sync_playwright() as p:
         with ap.expect_download() as observed:ap.locator('#export-session').click()
         diagnostic_path=OUT/('auto-diagnostic-angled.json' if angled else 'auto-diagnostic-overhead.json')
         observed.value.save_as(str(diagnostic_path))
-        print('AUTO DIAGNOSTIC',angled,json.loads(diagnostic_path.read_text()).get('autoReferee'),flush=True)
+        observed_result=json.loads(diagnostic_path.read_text())['autoReferee']['lastResult']
+        print('AUTO DIAGNOSTIC',angled,observed_result,flush=True)
+        assert observed_result['score']['totals']==[25,25]
+        assert not observed_result['hadObstruction'] and not observed_result['unexplainedLosses']
+        assert not observed_result['score']['review'] and not observed_result['twentyCandidates']
+        if observed_result['hadFrameGap']:
+            # A real capture/analysis timing gap must HOLD, not be hidden to make a CI score pass.
+            assert observed_result['scoreApplied'] is False
+            expect(ap.locator('#score-0')).to_have_text('0')
+            expect(ap.locator('#auto-status')).to_contain_text('held for review')
+            ap.locator('#apply-reviewed-score').click()
+        else:
+            assert observed_result['scoreApplied'] is True
         expect(ap.locator('#score-0')).to_have_text('25')
         expect(ap.locator('#score-1')).to_have_text('25')
         expect(ap.locator('.clip').first).to_contain_text('AUTO CLIP')
@@ -259,14 +272,21 @@ with sync_playwright() as p:
         alog=json.loads(log_path.read_text())
         assert alog['automaticVerdictsEnabled'] is False
         assert alog['clips'][0]['autoTriggered'] is True
-        assert alog['clips'][0]['autoResult']['scoreApplied'] is True
+        second_result=alog['clips'][0]['autoResult']
+        assert second_result['score']['totals']==[50,25]
+        assert not second_result['hadObstruction'] and not second_result['unexplainedLosses']
+        assert not second_result['score']['review'] and not second_result['twentyCandidates']
+        assert second_result['scoreApplied'] is (not second_result['hadFrameGap'])
+        if second_result['hadFrameGap']:
+            expect(ap.locator('#auto-status')).to_contain_text('held for review')
+        print('AUTO APPLICATION',angled,{'first':observed_result['scoreApplied'],'second':second_result['scoreApplied']},flush=True)
         assert alog['autoReferee']['twenties']==[1,0]
         assert alog['autoReferee']['adjustments']==[5,0]
         assert alog['clips'][0]['preRollSeconds']==0
         ap.locator('#stop-source').click()
         assert ap.locator('#source-video').evaluate('(v)=>v.srcObject===null')
         ap.close();ac.close()
-        passed(('angled' if angled else 'overhead')+' synthetic camera: auto trigger → playable/exportable clip → 25–25 score; next shot preserves 20s and corrections')
+        passed(('angled' if angled else 'overhead')+' synthetic camera: automatic playable clips, correct score or explicit frame-gap hold; next shot preserves 20s and corrections')
     mobile=context.new_page()
     mobile.set_viewport_size({'width':390,'height':844})
     mobile.goto(base,wait_until='networkidle')
