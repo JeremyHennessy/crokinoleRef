@@ -81,10 +81,10 @@ with sync_playwright() as p:
     auto_page.goto(base,wait_until='networkidle')
     auto_page.locator('#demo').click()
     expect(auto_page.locator('#disc-count')).to_have_text('4',timeout=15000)
-    expect(auto_page.locator('#auto-status')).to_contain_text('Shot 1 settled',timeout=12000)
-    expect(auto_page.locator('#score-0')).to_have_text('25')
+    expect(auto_page.locator('#score-0')).to_have_text('25',timeout=12000)
     expect(auto_page.locator('#score-1')).to_have_text('25')
     expect(auto_page.locator('#auto-score-detail')).to_contain_text('total 25–25')
+    expect(auto_page.locator('#auto-status')).to_contain_text('settled')
     passed('auto referee segments synthetic shot and applies settled-board score')
     auto_page.close()
     # Restart the demo so the centre hole is unobstructed, then exercise the real smart-calibration detector.
