@@ -225,6 +225,12 @@ with sync_playwright() as p:
         ap.wait_for_timeout(300)
         ap.evaluate('window.syntheticCamera.shoot()')
         expect(ap.locator('#clip-count')).to_have_text('1',timeout=15000)
+        # Preserve the observed shot evidence even when a score is correctly held.
+        ap.screenshot(path=str(OUT/('auto-camera-angled.png' if angled else 'auto-camera-overhead.png')),full_page=True)
+        with ap.expect_download() as observed:ap.locator('#export-session').click()
+        diagnostic_path=OUT/('auto-diagnostic-angled.json' if angled else 'auto-diagnostic-overhead.json')
+        observed.value.save_as(str(diagnostic_path))
+        print('AUTO DIAGNOSTIC',angled,json.loads(diagnostic_path.read_text()).get('autoReferee'),flush=True)
         expect(ap.locator('#score-0')).to_have_text('25')
         expect(ap.locator('#score-1')).to_have_text('25')
         expect(ap.locator('.clip').first).to_contain_text('AUTO CLIP')
