@@ -72,22 +72,36 @@ with sync_playwright() as p:
     passed('synthetic demo traverses real worker detector; canvas aspect ratio is preserved')
     page.locator('#calibrate').click()
     canvas = page.locator('#board')
-    for index, (x,y) in enumerate([(480,360),(574,360),(665,360),(760,360),(620,290),(634,290)]):
+    expect(page.locator('#calibration-guide')).to_be_visible()
+    expect(page.locator('#calibration-target')).to_contain_text('Click 1 of 9')
+    calibration_points=[(480,80),(760,360),(480,640),(200,360),(480,360),(574,360),(665,360),(620,290),(634,290)]
+    # Verify correction controls before completing the calibration.
+    canvas.scroll_into_view_if_needed(); box = canvas.bounding_box()
+    canvas.click(position={'x': calibration_points[0][0]/960*box['width'], 'y': calibration_points[0][1]/720*box['height']})
+    expect(page.locator('#calibration-target')).to_contain_text('Click 2 of 9')
+    page.locator('#undo-calibrate').click()
+    expect(page.locator('#calibration-target')).to_contain_text('Click 1 of 9')
+    for index, (x,y) in enumerate(calibration_points):
         # The setup button can scroll the board above the viewport. Never use
         # stale absolute mouse coordinates: click relative to the visible canvas.
         canvas.scroll_into_view_if_needed()
         box = canvas.bounding_box()
         canvas.click(position={'x': x/960*box['width'], 'y': y/720*box['height']})
-        if index < 5:
-            expect(page.locator('#stage-hint')).to_contain_text(f'{index+2} / 6')
-    expect(page.locator('#stage-hint')).to_contain_text('Geometry set.')
+        if index < 8:
+            expect(page.locator('#stage-hint')).to_contain_text(f'{index+2} / 9')
+    expect(page.locator('#stage-hint')).to_contain_text('Alignment check')
+    expect(page.locator('#calibration-target')).to_contain_text('Alignment check')
+    expect(page.locator('#accept-calibrate')).to_be_visible()
     page.screenshot(path=str(OUT/'calibration.png'), full_page=True)
-    expect(page.locator('#calibration-status')).to_contain_text('28 px')
+    page.locator('#accept-calibrate').click()
+    expect(page.locator('#stage-hint')).to_contain_text('Angled-view geometry saved')
+    expect(page.locator('#calibration-status')).to_contain_text('29 px')
     expect(page.locator('#tracking-status')).to_contain_text('save an empty board')
+    expect(page.locator('#calibration-guide')).to_be_hidden()
     page.locator('#calibrate').click()
     page.locator('#cancel-calibrate').click()
-    expect(page.locator('#calibration-status')).to_contain_text('28 px')
-    passed('six-click calibration and cancellation preserve prior valid geometry')
+    expect(page.locator('#calibration-status')).to_contain_text('29 px')
+    passed('guided nine-click angled calibration, undo, acceptance and cancellation preserve valid geometry')
     page.locator('#stop-source').click()
     page.locator('#connect').click()
     expect(page.locator('#source-badge')).to_contain_text('LIVE', timeout=15000)
