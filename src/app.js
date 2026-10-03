@@ -241,7 +241,7 @@ function circle(x, y, r, fill, stroke = null) { rawCtx.beginPath(); rawCtx.arc(x
 function paintDemo(t, empty = false) {
   rawCtx.fillStyle = '#223e35'; rawCtx.fillRect(0, 0, 960, 720);
   circle(480, 360, 325, '#102a25'); circle(480, 360, 309, '#a78052'); circle(480, 360, 294, '#2d2922'); circle(480, 360, 280, '#dfc594', '#705939');
-  for (const r of [185, 94]) circle(480, 360, r, '#dfc594', '#a48453');
+  for (const r of [260, 185, 94]) circle(480, 360, r, '#dfc594', '#a48453');
   rawCtx.strokeStyle = '#705939'; rawCtx.lineWidth = 2;
   for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2; rawCtx.beginPath(); rawCtx.moveTo(480 + 268 * Math.cos(a), 360 + 268 * Math.sin(a)); rawCtx.lineTo(480 + 280 * Math.cos(a), 360 + 280 * Math.sin(a)); rawCtx.stroke(); }
   for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; circle(480 + Math.cos(a) * 94, 360 + Math.sin(a) * 94, 5, '#4a3929'); }
@@ -256,7 +256,7 @@ function paintDemo(t, empty = false) {
 function startDemo() {
   if (!stopSource()) return;
   state.mode = 'demo'; resize(960, 720);
-  state.calibration = makeCalibration([{ x: 480, y: 360 }, { x: 574, y: 360 }, { x: 665, y: 360 }, { x: 760, y: 360 }, { x: 620, y: 290 }, { x: 634, y: 290 }], 960, 720);
+  state.calibration = makeCalibration([{ x: 480, y: 360 }, { x: 574, y: 360 }, { x: 665, y: 360 }, { x: 740, y: 360 }, { x: 620, y: 290 }, { x: 634, y: 290 }], 960, 720);
   paintDemo(0, true); smallCtx.drawImage(raw, 0, 0, small.width, small.height); state.background = smallCtx.getImageData(0, 0, small.width, small.height).data;
   state.colors = [[46, 113, 143], [168, 64, 54]]; state.demoStart = performance.now();
   $('welcome').hidden = true; $('demo-label').hidden = false; $('source-badge').textContent = 'DEMO · simulated board'; $('reported-fps').textContent = 'Synthetic';
