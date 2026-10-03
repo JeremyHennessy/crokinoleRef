@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check src/app.js && node --check src/core.js && node --check src/vision-worker.js && node --check src/perspective.js && node --check src/calibration-guide.js && node --check src/auto-calibration.js",
+    "check": "node --check src/app.js && node --check src/core.js && node --check src/vision-worker.js && node --check src/perspective.js && node --check src/calibration-guide.js && node --check src/auto-calibration.js && node --check src/auto-referee.js && node --check src/visibility.js",
     "start": "python3 -m http.server 8080 --bind 127.0.0.1"
   },
   "engines": { "node": ">=22" }

@@ -24,3 +24,9 @@ The workflow stages only runtime assets and setup docs, then records the deploye
 The calibration component was additionally exercised in a local in-memory Chromium page with no network or camera: both click sequences, corrected preview, manual apply, cancellation preserving prior state, and 390 px layout. The actual component source was used; this is narrower than an end-to-end app test.
 
 The repository browser suite retains camera/replay/scoring regression checks and now covers the guide, perspective mode, undo, retake, manual confirmation and mobile instructions. Consult the latest PR/CI result for the combined suite outcome.
+
+## Automation review — 2026-10-03
+
+The review reproduced the UI coordinate defect independently (old 10–5, corrected 25–25 for the same four known positions). The current local suite passes **76 Node unit/integration tests**, including full synthetic pixel detector → tracker → shot analyser → settled score, multi-resolution coordinate parity, hard gates for gaps/obstruction/line calls, moving puck entry, no automatic 20 from disappearance, confirmed-20/manual-adjustment arithmetic, and new-round clearing. JavaScript syntax checks pass. These are not real-camera accuracy tests.
+
+The extended browser suite requires separate overhead and angled synthetic camera runs through the normal capture, calibration, colour sampling, worker and MediaRecorder paths. It checks automatic clip start/stop, playable/exportable video, 25–25 scoring, a second shot retaining a confirmed 20 and manual adjustment, demo isolation, and existing calibration/replay/mobile regressions. At the time this source record was prepared, the updated full-browser CI run had **not yet completed**. Refer to the PR checks and artifact report for the final outcome; the test script alone is not evidence of a pass.
