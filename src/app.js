@@ -309,7 +309,7 @@ function paintDemo(t, empty = false) {
   rawCtx.fillStyle = '#886d48'; rawCtx.font = '16px Georgia'; rawCtx.textAlign = 'center'; rawCtx.fillText('5', 690, 363); rawCtx.fillText('10', 620, 363); rawCtx.fillText('15', 545, 363);
   if (empty) return;
   const a = [46, 113, 143], b = [168, 64, 54];
-  const s = t % 7, moving = clamp(s - 1, 0, 0.6), hit = clamp(s - 1.6, 0, 0.55);
+  const s = Math.min(t, 6.9), moving = clamp(s - 1, 0, 0.6), hit = clamp(s - 1.6, 0, 0.55);
   circle(480, 572 - moving * 240, 14, `rgb(${a})`); circle(480, 400 - hit * 200, 14, `rgb(${b})`);
   circle(620, 290, 14, `rgb(${a})`); circle(340, 410, 14, `rgb(${b})`);
 }
