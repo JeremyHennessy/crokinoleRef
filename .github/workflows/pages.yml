@@ -66,9 +66,9 @@ jobs:
           import json, os, datetime
           from pathlib import Path
           sha = os.environ['GITHUB_SHA']
-          Path('_site/build-info.json').write_text(json.dumps({'commit': sha, 'version': '0.1.0', 'builtAt': datetime.datetime.now(datetime.timezone.utc).isoformat()}))
+          Path('_site/build-info.json').write_text(json.dumps({'commit': sha, 'version': '0.2.0', 'builtAt': datetime.datetime.now(datetime.timezone.utc).isoformat()}))
           p = Path('_site/index.html')
-          p.write_text(p.read_text().replace('Prototype 0.1.0</span>', f'Prototype 0.1.0 · {sha[:7]}</span>'))
+          p.write_text(p.read_text().replace('Prototype 0.2.0</span>', f'Prototype 0.2.0 · {sha[:7]}</span>'))
           PY
       - uses: actions/upload-pages-artifact@v4
         with:
