@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#193e38">
+  <meta name="description" content="A local-first crokinole camera, replay and scoring assistant. Human-reviewed, not an automatic referee.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; worker-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <title>Crokinole Ref · Your table. A clearer view.</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./src/app.js"></script>
+</head>
+<body>
+  <header class="masthead">
+    <a class="brand" href="./" aria-label="Crokinole Ref home"><span class="brand-mark" aria-hidden="true">◎</span><span>CROKINOLE <b>REF</b></span></a>
+    <span class="pill">LOCAL-FIRST <span class="dot"></span> v0.1</span>
+  </header>
+  <main>
+    <section class="intro"><div><p class="eyebrow">THE TABLE-SIDE ASSISTANT</p><h1>Your table.<br class="mobile-only"> A clearer view.</h1><p>Watch the board. Revisit the shot. Make the call.</p></div><button id="export-session" class="secondary">Export match log ↗</button></section>
+    <div id="notice" role="status" aria-live="polite">Prototype · Automatic verdicts are disabled. You remain the referee.</div>
+    <div class="workspace">
+      <section class="view-panel panel" aria-labelledby="board-heading">
+        <div class="panel-heading"><div><p class="eyebrow">OVERHEAD VIEW</p><h2 id="board-heading">The board</h2></div><span id="source-badge" class="badge">No camera connected</span></div>
+        <div class="stage" id="stage">
+          <canvas id="board" width="960" height="720" aria-label="Board camera view. Calibration instructions appear below." tabindex="0"></canvas>
+          <div id="welcome" class="welcome"><div class="lens-symbol" aria-hidden="true">◎</div><h3>Pull up a seat.</h3><p>Connect your overhead webcam,<br>or explore with a simulated board.</p><button id="demo" class="light">Try the demo →</button><span>No camera or sign-in needed for the demo.</span></div>
+          <span id="demo-label" class="stage-label" hidden>SYNTHETIC DEMO · NOT CAMERA EVIDENCE</span>
+          <span id="record-label" class="record-label" hidden>● RECORDING</span>
+        </div>
+        <div class="stage-footer"><p id="stage-hint">Mount the camera directly overhead, with the whole board in view.</p><label class="inline"><input id="overlays" type="checkbox" checked> Guides</label></div>
+        <div id="file-controls" class="file-controls" hidden><button id="file-play" class="secondary">Play / pause</button><input id="file-seek" type="range" min="0" max="1000" value="0" aria-label="Imported video position"><span id="file-time">0:00</span></div>
+        <div class="metrics" aria-label="Capture diagnostics"><div><span>Camera reports</span><strong id="reported-fps">—</strong></div><div><span>Observed / analysed fps</span><strong id="observed-fps">—</strong></div><div><span>Largest recent gap</span><strong id="frame-gap">—</strong></div><div><span>Candidate discs</span><strong id="disc-count">—</strong></div></div>
+        <div class="shot-toolbar"><div><h3>Review the shot, not a guess.</h3><p id="record-hint">Start a clip <b>before</b> shooting. No pre-roll in this version.</p></div><button id="record" class="primary" disabled>● Start clip</button><button id="stop-record" class="danger" hidden>■ Finish clip</button></div>
+      </section>
+      <aside class="setup panel" aria-labelledby="setup-heading">
+        <div class="panel-heading"><div><p class="eyebrow">GET READY</p><h2 id="setup-heading">Table setup</h2></div><button id="stop-source" class="text-button" disabled>Disconnect</button></div>
+        <section class="setup-step"><h3><span class="step">1</span> Choose your camera</h3><label for="camera">Video input</label><div class="input-row"><select id="camera"><option value="">Default camera</option></select><button id="refresh-cameras" class="secondary" aria-label="Refresh camera list">↻</button></div><label for="capture-mode">Requested capture mode</label><select id="capture-mode"><option value="1080-30">1080p / 30 fps · start here</option><option value="720-60">720p / 60 fps · if supported</option></select><button id="connect" class="primary wide">Connect webcam</button><div class="import-row"><button id="import-button" class="text-button">Open a local video instead</button><input id="import-video" type="file" accept="video/*" hidden></div><p class="help">Video only. No microphone, uploads or cloud processing. Modes are requests, not guarantees.</p></section>
+        <section class="setup-step"><h3><span class="step">2</span> Calibrate the board</h3><p class="help">Near-vertical view required. Follow six clicks to set the scoring circles and disc size.</p><button id="calibrate" class="secondary wide" disabled>Calibrate with six clicks</button><button id="cancel-calibrate" class="text-button" hidden>Cancel calibration</button><p id="calibration-status" class="small-status">Not calibrated</p></section>
+        <section class="setup-step"><h3><span class="step">3</span> Teach it your discs</h3><p class="help">First clear <b>all discs and hands</b> from the board, then save the empty view. After that, place one disc of each team and sample their centres.</p><button id="background" class="secondary wide" disabled>Save empty board</button><div class="two-buttons"><button id="sample-a" class="secondary" disabled>Sample team A</button><button id="sample-b" class="secondary" disabled>Sample team B</button></div><label for="tolerance">Colour tolerance <output id="tolerance-value">70</output></label><input id="tolerance" type="range" min="25" max="140" value="70"><p id="tracking-status" class="small-status">Waiting for calibration</p></section>
+        <div class="ref-note"><strong>Evidence before verdicts.</strong><p>Contact markers mean proximity, not proven impact. Hands, blur and merged discs can break tracking. No contact detected ≠ a foul.</p></div>
+      </aside>
+    </div>
+    <div class="lower-grid">
+      <section class="panel" aria-labelledby="score-heading"><div class="panel-heading"><div><p class="eyebrow">KEEP THE GAME MOVING</p><h2 id="score-heading">Scoreboard</h2></div><span class="badge">Manual scoring</span></div><div class="score-controls"><label for="score-mode">Round scoring</label><select id="score-mode"><option value="difference">Difference in points</option><option value="match">Match points · win 2 / tie 1</option></select></div><div id="players" class="players"></div><div class="score-actions"><button id="finish-round" class="primary">Finish round</button><button id="undo-score" class="secondary" disabled>Undo</button><button id="new-match" class="text-button">New match</button></div><p id="round-status" class="help">Round 1 · Enter disc points and 20s manually. Detection never changes your score.</p><div id="round-history" class="round-history"></div></section>
+      <section class="panel" aria-labelledby="clips-heading"><div class="panel-heading"><div><p class="eyebrow">THE EVIDENCE DESK</p><h2 id="clips-heading">Shot library <span id="clip-count">0</span></h2></div><span class="badge">This tab only</span></div><p class="help library-help">Up to 6 clips, 64 MB each, 128 MB total. Export recordings before closing or refreshing. Match log export does not include videos.</p><div id="clips" class="clips"><div class="empty-clips"><span aria-hidden="true">↺</span><h3>Every close call deserves a replay.</h3><p>Your recorded and imported clips will appear here.</p></div></div><div class="contact-box"><p class="eyebrow">LIVE TRACKING · EXPERIMENTAL</p><p id="contact-status">Possible contact events will appear after setup. First-contact order is not verified.</p></div></section>
+    </div>
+    <footer><span>Crokinole Ref · Prototype 0.1.0</span><span>Built for friendly games. Not a certified tournament official.</span><a href="./docs/QUICKSTART.md">Setup & limitations ↗</a></footer>
+  </main>
+  <video id="source-video" playsinline muted hidden></video>
+  <dialog id="replay-dialog"><div class="dialog-header"><div><p class="eyebrow">SHOT REVIEW</p><h2 id="replay-title">Replay</h2></div><button id="close-replay" class="secondary">Close</button></div><video id="replay-video" controls playsinline></video><div class="replay-controls"><button id="seek-back" class="secondary">−33 ms</button><button id="seek-forward" class="secondary">+33 ms</button><label for="replay-speed">Speed</label><select id="replay-speed"><option value="0.25">¼ speed</option><option value="0.5">½ speed</option><option value="1" selected>Normal</option></select><button id="download-clip" class="primary">Export video</button></div><p class="help">33 ms seeks are approximate, not guaranteed frame stepping. Replay cannot recover frames the camera missed. The video is unmodified; candidate events are listed separately.</p><div id="replay-events" class="replay-events"></div><label for="verdict">Your decision (manual)</label><select id="verdict"><option value="review-needed">Review needed</option><option value="valid">Valid · confirmed by player</option><option value="foul">Foul · confirmed by player</option></select><label for="review-note">Review notes / first disc hit</label><textarea id="review-note" rows="2" maxlength="500" placeholder="Record what you actually saw, or leave the contact order unresolved."></textarea><button id="save-verdict" class="primary wide">Save manual decision</button></dialog>
+  <noscript>This application needs JavaScript enabled. No camera is accessed until you press Connect webcam.</noscript>
+</body>
+</html>
