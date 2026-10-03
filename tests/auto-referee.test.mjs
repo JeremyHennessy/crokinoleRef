@@ -62,6 +62,20 @@ test('frame gap prevents a disappearing centre puck from being auto-awarded as a
   assert.equal(end.applyScore,false);
 });
 
+test('identity reset near centre does not create a 20 when team puck count is unchanged',()=>{
+  const a=new AutoShotAnalyzer(calibration,{settleSeconds:.35});
+  a.update(frame([d(1,0,220,150)]),0);
+  a.update(frame([d(1,0,220,150)]),.04);
+  a.update(frame([d(1,0,190,150)]),.08);
+  a.update(frame([d(1,0,158,150)]),.12);
+  a.update(frame([d(3,0,210,150)]),.16);
+  a.update(frame([d(3,0,210,150)]),.24);
+  const end=a.update(frame([d(3,0,210,150)]),.62).event;
+  assert.equal(end.type,'shot-end');
+  assert.equal(end.twentiesAdded.length,0);
+  assert.equal(end.twentyCandidates.length,0);
+});
+
 test('multiple centre disappearances are review candidates, not invented 20s',()=>{
   const a=new AutoShotAnalyzer(calibration,{settleSeconds:.4});
   a.update(frame([d(1,0,180,150),d(2,1,180,160)]),0);
