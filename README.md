@@ -4,11 +4,11 @@ A GitHub Pages interface for a local-first crokinole webcam, replay and scoring 
 
 **Prototype, not an automatic tournament referee.** Contact candidates are diagnostic observations, not proof of impact or first-contact order. No computer-generated verdict changes the score.
 
-## First build: v0.1.0
+## Current build: v0.2.0
 
 - Browser webcam capture with selectable camera and requested capture mode; microphone is never requested.
 - Camera-reported frame rate, observed video callbacks, analysed callbacks and recent largest frame interval shown separately.
-- Six-click, near-overhead board calibration; empty-board reference and two sampled disc colours.
+- Guided nine-click angled-view calibration with projective rectification, click markers, undo/restart and a visual alignment check; empty-board reference and two sampled disc colours.
 - Experimental background-subtraction / colour-component detector in a dedicated worker, with conservative disc identity tracking and review-only proximity candidates.
 - Manually started video clips, slow replay, approximate 33 ms seeks, original video export and human review notes.
 - Local video import, synthetic demo, manual scoreboard, round history, undo and JSON match-log export.
@@ -42,9 +42,9 @@ python -m playwright install chromium
 python tests/browser_smoke.py
 ```
 
-## Explicit non-goals of v0.1
+## Explicit non-goals of v0.2
 
-No verified first-contact classification, automatic legal/foul decisions, automatic 20 detection, automatic scoring, perspective correction, automatic shot segmentation, pre-roll or permanent video library. Fast shots, occlusion, lighting changes and touching discs can defeat this detector. Those gaps remain visible rather than becoming invented certainty.
+No verified first-contact classification, automatic legal/foul decisions, automatic 20 detection, automatic scoring, automatic shot segmentation, pre-roll or permanent video library. Perspective correction is implemented but has not yet been validated on Jeremy's physical board or webcam. Fast shots, occlusion, lighting changes and touching discs can defeat this detector. Those gaps remain visible rather than becoming invented certainty.
 
 ## Architecture and privacy
 
