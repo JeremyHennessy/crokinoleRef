@@ -75,7 +75,7 @@ export class CalibrationGuide {
   }
   drawPoints() {
     const c=this.ctx,s=this.canvas.width/800;c.save();c.font=`bold ${14*s}px system-ui`;c.textAlign='left';c.textBaseline='middle';
-    this.points.forEach((p,i)=>{c.fillStyle='#f4d178';c.strokeStyle='#173d37';c.lineWidth=2*s;c.beginPath();c.arc(p.x,p.y,5*s,0,Math.PI*2);c.fill();c.stroke();const label=`${i+1} · ${this.steps[i].short}`;c.lineWidth=4*s;c.strokeText(label,p.x+9*s,p.y-9*s);c.fillStyle='#fffbea';c.fillText(label,p.x+9*s,p.y-9*s);});c.restore();
+    this.points.forEach((p,i)=>{c.fillStyle='#f4d178';c.strokeStyle='#173d37';c.lineWidth=2*s;c.beginPath();c.arc(p.x,p.y,5*s,0,Math.PI*2);c.fill();c.stroke();const short=this.steps[i].short,label=`${i+1} · ${short}`,x=p.x+(short==='P'?-38:9)*s,y=p.y+(short==='E'?18:short==='P'?-18:-9)*s;c.lineWidth=4*s;c.strokeText(label,x,y);c.fillStyle='#fffbea';c.fillText(label,x,y);});c.restore();
   }
   drawGuides() {
     const {calibration:c,projection:p}=this.candidate,ctx=this.ctx;
