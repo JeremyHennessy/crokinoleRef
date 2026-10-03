@@ -61,7 +61,7 @@ export function createCapture(stream, {
 
 export class RollingClipBuffer {
   constructor({ now = () => performance.now(), sourceTime = () => 0,
-    Recorder = globalThis.MediaRecorder, setTimer = setTimeout, clearTimer = clearTimeout,
+    Recorder = globalThis.MediaRecorder, setTimer = (fn, ms) => setTimeout(fn, ms), clearTimer = id => clearTimeout(id),
     onStatus = () => {}, onError = () => {}, targetMs = PRE_ROLL_MS, idleBytes = 16 * MB } = {}) {
     if (!(targetMs > 0 && idleBytes > 0)) throw Error('Invalid pre-roll limits.');
     Object.assign(this, { now, sourceTime, Recorder, setTimer, clearTimer, onStatus, onError, targetMs, idleBytes });
