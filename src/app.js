@@ -22,7 +22,7 @@ const guide = new CalibrationGuide({
 });
 let worker;
 try {
-  worker = new Worker(new URL('./vision-worker.js?calibration=2', import.meta.url), { type: 'module' });
+  worker = new Worker(new URL('./vision-worker.js?smart=1', import.meta.url), { type: 'module' });
   worker.onmessage = ({ data: m }) => {
     if (m.generation !== state.generation) return;
     state.inflight = false;
