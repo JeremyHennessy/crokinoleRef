@@ -1,19 +1,43 @@
 # First game setup
 
-## Try the interface first
+## Camera position and the guided calibration
 
-Open the GitHub Pages site and choose **Try the demo**. The demo is generated locally and runs through the same experimental detector as a camera. It is not evidence of real-camera accuracy. It does not change match scores, access a camera or create real-shot clips.
+Choose **Angled view · around 45°** for an oblique camera, or **Overhead** only when the board already looks circular. The angled option corrects the board plane before experimental tracking. It does not recover hidden pucks, improve the camera's frame rate, remove lens distortion, or correct the height of pegs/pucks above the board.
 
-## Connect your overhead webcam
+Keep the entire scoring circle visible. Place one stationary puck on the board, remove your hands and choose **Open calibration guide**. The image freezes. Each step has a plain-language instruction, an illustration, numbered click markers and a pointer magnifier on larger screens. The illustration is not your camera view.
 
-1. Use a computer browser with the USB webcam connected. Keep the whole board and ditch visible, with the camera directly overhead and securely mounted. Use bright, even lighting without glare. Perspective correction is not implemented.
-2. Choose **1080p / 30 fps** initially, then **Connect webcam**. Allow camera permission. The microphone is not requested. A requested mode is a preference; the camera may supply something different.
-3. Compare **Camera reports**, **Observed / analysed fps**, and **Largest recent gap**. Observed callbacks are not a guaranteed sensor frame rate. At 30 fps, adjacent frames are about 33 ms apart; two impacts can happen in that interval. The app never guarantees first-contact order.
-4. With a disc on the board, choose **Calibrate with six clicks**. The view freezes. Click the centre hole, the 15 ring line, the 10 ring line, the outer 5/shooting line, a disc centre, and the edge of that same disc. The ring overlay should align all the way around. If the board looks elliptical, correct the camera position rather than accepting a poor fit.
-5. Remove every disc and hand, then choose **Save empty board**. This reference removes stationary wood grain, pegs and scoring lines from the experimental detector.
-6. Place one disc from each team on the board. Sample Team A and Team B at the solid centre of each disc. Adjust colour tolerance only as necessary. Shadows, similar wood-coloured discs, glare, changing exposure and touching discs may defeat detection.
+### Angled camera: nine clicks
 
-Recalibrate and recapture the background after the camera, board or lighting changes. Calibration is intentionally not silently reused across camera sessions. Small board discs are harder to resolve after analysis is reduced to 640 pixels wide; recording still uses the camera stream.
+| Click | Where to click | Avoid |
+|---|---|---|
+| 1 | Centre of the 20-hole opening at the playing surface | A puck, peg, or the bottom of the hole |
+| 2–5 | The four actual quarter/divider marks where they meet the outer printed shooting circle, going around the board clockwise | Guessed top/bottom/left/right extremes of the oval; the wooden rail or gutter |
+| 6 | The smallest printed scoring circle, between pegs: the 15-point line | A peg's top |
+| 7 | The middle printed scoring circle: the 10-point line | The outer shooting circle |
+| 8 | Centre of the top face of a clearly visible puck | Its shadow |
+| 9 | Edge of that SAME puck, preferably its left or right edge | Another puck or its shadow |
+
+Start quarter mark A at any clearly visible quadrant mark; it does not have to appear at the top of the camera image. B is the next mark clockwise, C is opposite A and D is opposite B. These must be four physical quarter-turn marks on the same circle. If they are absent or hidden, cancel instead of guessing; recording and manual replay do not require calibration.
+
+### Overhead camera: six clicks
+
+Click the centre hole, the 15 line, the 10 line, the outer printed shooting line, a puck centre, then the edge of that same puck. The detailed instructions and illustration change after every click.
+
+### Check before applying
+
+The guide does not change the active calibration while you are clicking. **Undo last click** goes back one point; **Retake image / start over** takes a fresh image; **Cancel** keeps the previous calibration. Once all points are placed, inspect the guides on your actual image and the straightened preview. They should follow the printed rings all the way around. Only press **Use this calibration** when the fit looks right. A geometry fit is not a verified referee decision.
+
+The centre hole is checked independently against the four quarter marks. Misordered, repeated, off-frame or inconsistent points are rejected. A small centre residual is only a fit diagnostic, not a guarantee of millimetre accuracy.
+
+## Teach the detector your empty board and puck colours
+
+After applying calibration, remove ALL pucks and hands and press **Save empty board**. Then place one puck from each team. Press **Sample team A**, click that puck's solid centre in the camera image, and repeat for B. Do not sample a highlight or shadow. An updated calibration deliberately clears the old background/colour setup.
+
+Recalibrate and capture a new empty reference after moving the camera or board, or changing lighting. Camera capture mode is a request, not a guarantee: compare reported, observed and analysed frame rates. About 33 ms separates frames at 30 fps, so multiple contacts may happen between them. The app never guarantees first-contact order.
+
+## Try without a camera
+
+**Try the demo** generates synthetic discs locally. Four reference ticks are included for practicing the guide. Synthetic success is not proof of real-camera accuracy. The demo does not change match scores or create real-shot recordings.
 
 ## Record and review a shot
 

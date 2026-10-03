@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/core.test.mjs",
-    "check": "node --check src/app.js && node --check src/core.js && node --check src/vision-worker.js",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check src/app.js && node --check src/core.js && node --check src/vision-worker.js && node --check src/perspective.js && node --check src/calibration-guide.js",
     "start": "python3 -m http.server 8080 --bind 127.0.0.1"
   },
   "engines": { "node": ">=22" }
