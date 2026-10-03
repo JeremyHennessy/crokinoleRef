@@ -71,12 +71,17 @@ with sync_playwright() as p:
     assert page.locator('#board').evaluate('(c)=>Math.abs(c.getBoundingClientRect().width/c.getBoundingClientRect().height-c.width/c.height) < 0.01')
     passed('synthetic demo traverses real worker detector; canvas aspect ratio is preserved')
     page.locator('#calibrate').click()
-    box = page.locator('#board').bounding_box()
-    for x,y in [(480,360),(574,360),(665,360),(760,360),(620,290),(634,290)]:
-        print('CAL BEFORE', x, y, json.dumps(page.evaluate("() => { const c=document.querySelector('#board'); const r=c.getBoundingClientRect(); return {rect:{x:r.x,y:r.y,width:r.width,height:r.height}, hint:document.querySelector('#stage-hint').textContent, notice:document.querySelector('#notice').textContent, scrollY}; }")), flush=True)
-        page.mouse.click(box['x']+x/960*box['width'],box['y']+y/720*box['height'])
-        print('CAL AFTER', page.locator('#stage-hint').inner_text(), page.locator('#notice').inner_text(), flush=True)
-    page.screenshot(path=str(OUT/'calibration-diagnostic.png'), full_page=True)
+    canvas = page.locator('#board')
+    for index, (x,y) in enumerate([(480,360),(574,360),(665,360),(760,360),(620,290),(634,290)]):
+        # The setup button can scroll the board above the viewport. Never use
+        # stale absolute mouse coordinates: click relative to the visible canvas.
+        canvas.scroll_into_view_if_needed()
+        box = canvas.bounding_box()
+        canvas.click(position={'x': x/960*box['width'], 'y': y/720*box['height']})
+        if index < 5:
+            expect(page.locator('#stage-hint')).to_contain_text(f'{index+2} / 6')
+    expect(page.locator('#stage-hint')).to_contain_text('Geometry set.')
+    page.screenshot(path=str(OUT/'calibration.png'), full_page=True)
     expect(page.locator('#calibration-status')).to_contain_text('28 px')
     expect(page.locator('#tracking-status')).to_contain_text('save an empty board')
     page.locator('#calibrate').click()
