@@ -72,7 +72,10 @@ with sync_playwright() as p:
     page.locator('#calibrate').click()
     box = page.locator('#board').bounding_box()
     for x,y in [(480,360),(574,360),(665,360),(760,360),(620,290),(634,290)]:
+        print('CAL BEFORE', x, y, json.dumps(page.evaluate("() => { const c=document.querySelector('#board'); const r=c.getBoundingClientRect(); return {rect:{x:r.x,y:r.y,width:r.width,height:r.height}, hint:document.querySelector('#stage-hint').textContent, notice:document.querySelector('#notice').textContent, scrollY}; }")), flush=True)
         page.mouse.click(box['x']+x/960*box['width'],box['y']+y/720*box['height'])
+        print('CAL AFTER', page.locator('#stage-hint').inner_text(), page.locator('#notice').inner_text(), flush=True)
+    page.screenshot(path=str(OUT/'calibration-diagnostic.png'), full_page=True)
     expect(page.locator('#calibration-status')).to_contain_text('28 px')
     expect(page.locator('#tracking-status')).to_contain_text('save an empty board')
     page.locator('#calibrate').click()
