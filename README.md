@@ -12,7 +12,7 @@ A GitHub Pages interface for a local-first crokinole webcam, replay and scoring 
 - The illustrated nine-click angled / six-click overhead guide remains as a manual fallback, with numbered markers, magnifier, undo, retake and explicit preview confirmation.
 - Experimental board-plane perspective correction from four actual quadrant marks with the centre in the best-fit solution. Empty-board reference and sampled team colours.
 - Worker-based background/colour detector with continuous puck identity tracking and review-only proximity candidates. Angled input and background are rectified together; overlays are projected back onto the original camera view.
-- Automatic shot segmentation from tracked puck motion and settlement. Camera clips can start on detected motion and stop after the board settles; manual recording remains available.
+- Automatic shot segmentation from tracked puck motion and settlement. Camera clips retain an optional rolling pre-shot lead-in (nominally 2–4 seconds after warm-up) and stop after the board settles; manual recording remains available.
 - Automatic settled-board scoring for visible pucks, plus review flags for possible 20s. A disappearing puck is never sufficient to award 20 automatically: confirm it with +20. Frame gaps, unexplained foreground, missing pucks and near-line positions hold the score for review.
 - Local video import, synthetic demo, auto scoreboard with manual corrections, round history, undo and JSON match-log export.
 - Match scores persist in this browser. Clips and review notes remain in this tab until exported; there is no server storage.
@@ -23,7 +23,7 @@ Use **GitHub Pages** for the UI. All camera/video processing runs on the visitor
 
 The workflow tests the project and publishes static files from `main`, then checks the published commit. A successful push alone is not proof of deployment. The initial tested build was merged at `5a406d4830ba3cea39b00fd1e56a091733c22db3` and published successfully.
 
-See [setup and click instructions](docs/QUICKSTART.md), [current handoff](docs/HANDOFF.md) and [verification record](docs/VERIFICATION.md).
+See [pre-shot buffering](docs/BUFFERING.md), [setup and click instructions](docs/QUICKSTART.md), [current handoff](docs/HANDOFF.md) and [verification record](docs/VERIFICATION.md).
 
 ## Local development
 
@@ -47,7 +47,7 @@ python tests/browser_smoke.py
 
 ## Explicit limitations
 
-No verified first-contact classification or automatic legal/foul decisions. Automatic shot segmentation, visible-board scoring and possible-20 review flags are implemented as assistance, but they remain unverified on the physical camera/board and can abstain when evidence is weak. Auto clips currently begin after motion is detected, so true pre-roll is not implemented. There is no permanent video library. Smart and manual perspective correction model the flat board only: occlusion, residual lens distortion and the height of pucks/pegs remain unresolved. Smart setup uses confidence gates and never silently applies its candidate; the user still confirms the overlay. Use the four physical quarter marks, not guessed extrema of the oval image. Fast shots, lighting changes and touching discs can defeat detection. Those gaps remain visible rather than becoming invented certainty.
+No verified first-contact classification or automatic legal/foul decisions. Automatic shot segmentation, visible-board scoring and possible-20 review flags are implemented as assistance, but they remain unverified on the physical camera/board and can abstain when evidence is weak. Buffered clips include pre-trigger frames when the buffer is ready. Early shots can have a shorter lead-in, and unavailable/disabled buffering falls back to recording on motion. Pre-roll uses additional local video encoders; actual frame delivery and encoded lead-in must be checked on the physical computer. There is no permanent video library. Smart and manual perspective correction model the flat board only: occlusion, residual lens distortion and the height of pucks/pegs remain unresolved. Smart setup uses confidence gates and never silently applies its candidate; the user still confirms the overlay. Use the four physical quarter marks, not guessed extrema of the oval image. Fast shots, lighting changes and touching discs can defeat detection. Those gaps remain visible rather than becoming invented certainty.
 
 ## Architecture and privacy
 

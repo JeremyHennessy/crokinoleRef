@@ -3,7 +3,11 @@
 (() => {
   const canvas=document.createElement('canvas');canvas.width=960;canvas.height=720;
   const ctx=canvas.getContext('2d');
-  const fixture={mode:'setup',start:null,secondStart:null,angled:false};
+  const fixture={mode:'setup',start:null,secondStart:null,angled:false,evidenceClock:false,recorders:[]};
+  const NativeRecorder=window.MediaRecorder;
+  window.MediaRecorder=class extends NativeRecorder {
+    constructor(...args){super(...args);if(fixture.evidenceClock)fixture.recorders.push(this);}
+  };
   const circle=(x,y,r,color,stroke=null)=>{ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();if(stroke){ctx.lineWidth=2;ctx.strokeStyle=stroke;ctx.stroke();}};
   fixture.point=(x,y)=>fixture.angled?{x:x+.10*y-30,y:.08*x+.72*y+75}:{x,y};
   fixture.shoot=()=>{fixture.mode='shot';fixture.start=performance.now();};
@@ -22,6 +26,15 @@
       if(fixture.start!==null){const t=(performance.now()-fixture.start)/1000;ay=572-Math.max(0,Math.min(t,.6))*240;by=400-Math.max(0,Math.min(t-.6,.55))*200;}
       if(fixture.mode==='second')ay=428-Math.max(0,Math.min((performance.now()-fixture.secondStart)/1000,.5))*56;
       circle(480,ay,14,'rgb(46,113,143)');circle(480,by,14,'rgb(168,64,54)');circle(620,290,14,'rgb(46,113,143)');circle(340,410,14,'rgb(168,64,54)');
+    }
+    // Test-only pixel clock OUTSIDE the scoring area. The decoder reads these
+    // 24 bits from saved video, independently of the app's pre-roll metadata.
+    if(fixture.evidenceClock){
+      ctx.setTransform(1,0,0,1,0,0);
+      const ticks=Math.floor(performance.now()/10);
+      for(let i=0;i<24;i++){
+        ctx.fillStyle=(ticks>>i)&1?'#fff':'#000';ctx.fillRect(8+i*12,8,10,14);
+      }
     }
   };
   draw();setInterval(draw,1000/30);

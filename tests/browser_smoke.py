@@ -199,6 +199,7 @@ with sync_playwright() as p:
         ap.on('dialog',lambda d:d.accept())
         ap.add_init_script((ROOT/'tests/synthetic_camera.js').read_text())
         ap.goto(base,wait_until='networkidle')
+        ap.locator('#pre-roll').uncheck() # Keep the existing trigger-only fallback regression.
         ap.evaluate('(angled)=>{window.syntheticCamera.angled=angled;}',angled)
         ap.locator('#connect').click()
         expect(ap.locator('#source-badge')).to_contain_text('LIVE')
@@ -287,6 +288,92 @@ with sync_playwright() as p:
         assert ap.locator('#source-video').evaluate('(v)=>v.srcObject===null')
         ap.close();ac.close()
         passed(('angled' if angled else 'overhead')+' synthetic camera: automatic playable clips, correct score or explicit frame-gap hold; next shot preserves 20s and corrections')
+    # Pre-roll proof: inspect a pixel-encoded source clock in the SAVED video,
+    # after several buffer rotations. Metadata alone would not prove lead-in.
+    for angled in [False, True]:
+        ac=browser.new_context(viewport={'width':1440,'height':1100},accept_downloads=True)
+        ap=ac.new_page()
+        ap.on('dialog',lambda d:d.accept())
+        ap.on('pageerror',lambda e:errors.append(str(e)))
+        ap.add_init_script((ROOT/'tests/synthetic_camera.js').read_text())
+        ap.goto(base,wait_until='networkidle')
+        ap.evaluate('(angled)=>{syntheticCamera.angled=angled;syntheticCamera.evidenceClock=true;}',angled)
+        ap.locator('#connect').click()
+        expect(ap.locator('#source-badge')).to_contain_text('LIVE')
+        ap.wait_for_timeout(1200)
+        if ap.locator('#calibration-dialog').is_visible():ap.locator('#cal-close').click()
+        ap.locator('.manual-calibration summary').click()
+        ap.locator('#calibration-mode').select_option('angled' if angled else 'overhead')
+        ap.locator('#calibrate').click()
+        pts=[(480,360),(480,100),(740,360),(480,620),(220,360),(574,360),(665,360),(620,290),(634,290)] if angled else [(480,360),(574,360),(665,360),(740,360),(620,290),(634,290)]
+        click_guide_points(ap,[(x+.10*y-30,.08*x+.72*y+75) if angled else (x,y) for x,y in pts])
+        ap.locator('#cal-apply').click()
+        ap.evaluate("syntheticCamera.mode='empty'");ap.wait_for_timeout(250);ap.locator('#background').click()
+        ap.evaluate("syntheticCamera.mode='pucks'");ap.wait_for_timeout(250)
+        for team,(x,y) in [('a',(620,290)),('b',(340,410))]:
+            ap.locator('#sample-'+team).click()
+            if angled:x,y=x+.10*y-30,.08*x+.72*y+75
+            canvas=ap.locator('#board');canvas.scroll_into_view_if_needed();box=canvas.bounding_box()
+            canvas.click(position={'x':x/960*box['width'],'y':y/720*box['height']})
+        expect(ap.locator('#disc-count')).to_have_text('4',timeout=15000)
+        expect(ap.locator('#buffer-status')).to_have_attribute('data-ready','true',timeout=10000)
+        ap.wait_for_timeout(4500) # Exercise actual retirement/replacement, not just first capture.
+        idle=ap.evaluate('({all:syntheticCamera.recorders.length,live:syntheticCamera.recorders.filter(r=>r.state==="recording").length})')
+        assert idle['all']>=3 and 1<=idle['live']<=2,idle
+        expect(ap.locator('#clip-count')).to_have_text('0') # Idle footage is not saved as clips.
+        label='angled' if angled else 'overhead'
+        proof=[]
+        for shot in [1,2]:
+            if shot==2:
+                ap.wait_for_timeout(2250)
+            trigger=ap.evaluate('()=>{syntheticCamera.'+('shoot' if shot==1 else 'second')+'();return performance.now();}')
+            expect(ap.locator('#clip-count')).to_have_text(str(shot),timeout=20000)
+            with ap.expect_download() as exported:ap.locator('#export-session').click()
+            log=json.loads(Path(exported.value.path()).read_text())
+            clip=log['clips'][0]
+            (OUT/f'preroll-{label}-shot{shot}.json').write_text(json.dumps(log,indent=2))
+            assert clip['autoTriggered'] and clip['complete'],clip
+            assert 1.5<=clip['preRollSeconds']<=5.5,clip
+            assert clip['timing']['preRollMethod']=='complete-overlapping-recorder-session'
+            ap.get_by_role('button',name='Review',exact=True).first.click()
+            rv=ap.locator('#replay-video')
+            rv.evaluate('(v)=>v.play()')
+            for _ in range(50):
+                if rv.evaluate('(v)=>v.readyState>=2&&v.videoWidth>0'):break
+                ap.wait_for_timeout(100)
+            assert rv.evaluate('(v)=>v.readyState>=2&&v.videoWidth>0'),'buffered clip did not decode'
+            rv.evaluate('(v)=>{v.pause();v.currentTime=.10;}')
+            for _ in range(50):
+                if rv.evaluate('(v)=>!v.seeking&&v.readyState>=2'):break
+                ap.wait_for_timeout(100)
+            decoded_ms=rv.evaluate('''v=>{
+                const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;
+                const x=c.getContext('2d');x.drawImage(v,0,0);let ticks=0;
+                for(let i=0;i<24;i++)if(x.getImageData(13+i*12,14,1,1).data[0]>128)ticks+=2**i;
+                return ticks*10;
+            }''')
+            measured=(trigger-decoded_ms)/1000
+            proof.append({'shot':shot,'triggerMs':trigger,'decodedFirstFrameMs':decoded_ms,'measuredLeadSeconds':measured,'reportedLeadSeconds':clip['preRollSeconds']})
+            (OUT/f'preroll-pixel-proof-{label}.json').write_text(json.dumps(proof,indent=2))
+            assert 1.5<measured<5.5,proof # Independently proves frames BEFORE the actual flick.
+            assert abs(measured-clip['preRollSeconds'])<.65,proof
+            if shot==1:
+                with ap.expect_download() as video_export:ap.locator('#download-clip').click()
+                video_export.value.save_as(str(OUT/f'preroll-{label}.webm'))
+            ap.locator('#close-replay').click()
+        ap.screenshot(path=str(OUT/f'preroll-{label}.png'),full_page=True)
+        ap.locator('#pre-roll').uncheck()
+        ap.wait_for_timeout(400)
+        assert ap.evaluate('syntheticCamera.recorders.every(r=>r.state==="inactive")')
+        assert ap.locator('#source-video').evaluate('(v)=>v.srcObject.active')
+        ap.locator('#pre-roll').check()
+        expect(ap.locator('#buffer-status')).to_have_attribute('data-ready','true',timeout=10000)
+        ap.locator('#stop-source').click();ap.wait_for_timeout(300)
+        assert ap.evaluate('syntheticCamera.recorders.every(r=>r.state==="inactive")')
+        assert ap.locator('#source-video').evaluate('(v)=>v.srcObject===null')
+        ap.close();ac.close()
+        passed(label+' buffered camera: two playable automatic clips contain independently decoded pre-flick frames after rollover; toggle/disconnect releases idle encoders')
+
     mobile=context.new_page()
     mobile.set_viewport_size({'width':390,'height':844})
     mobile.goto(base,wait_until='networkidle')
