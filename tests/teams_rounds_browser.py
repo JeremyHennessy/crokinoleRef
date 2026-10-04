@@ -41,7 +41,7 @@ with sync_playwright() as pw:
         page.add_init_script((ROOT/'tests/synthetic_camera.js').read_text());page.goto(base,wait_until='networkidle')
         page.evaluate('(a)=>{syntheticCamera.angled=a}',angled)
         page.locator('#round-allocation').fill('2');page.locator('#round-allocation').press('Tab')
-        page.locator('#pre-roll').uncheck() # Independent existing suite verifies retained pre-flick footage.
+        expect(page.locator('#pre-roll')).to_be_checked() # Exercise the normal buffered-camera path.
         page.locator('#connect').click();expect(page.locator('#source-badge')).to_contain_text('LIVE')
         page.wait_for_timeout(1200)
         if page.locator('#calibration-dialog').is_visible():page.locator('#cal-close').click()
@@ -62,6 +62,7 @@ with sync_playwright() as pw:
         page.evaluate("syntheticCamera.mode='round-play'");page.wait_for_timeout(900)
         expect(page.locator('#auto-round-status')).to_contain_text('Shots remaining')
         for i in range(4):
+            expect(page.locator('#buffer-status')).to_have_attribute('data-ready','true',timeout=10000)
             team=i%2
             page.evaluate('(t)=>syntheticCamera.placeRoundPuck(t)',team);page.wait_for_timeout(450)
             page.evaluate('syntheticCamera.flickRoundPuck()')
@@ -70,6 +71,7 @@ with sync_playwright() as pw:
             target=OUT/f'round-{angled}-{i}.json';download.value.save_as(str(target));payload=json.loads(target.read_text())
             timing=page.evaluate('roundTiming');(OUT/f'round-timing-{angled}-{i}.json').write_text(json.dumps(timing,indent=2));print('ROUND TIMING',timing,flush=True)
             event=payload['clips'][0]['autoResult'];print('ROUND EVENT',angled,i,event,'COUNTER',payload['roundTracking'],flush=True)
+            assert payload['clips'][0]['preRollSeconds'] >= 1.5
             assert event and not event['hadObstruction'] and not event['twentyCandidates']
             if i<3:
                 expect(page.locator('#round-status')).to_contain_text('Round 1')
