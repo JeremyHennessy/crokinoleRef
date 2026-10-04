@@ -1,0 +1,42 @@
+name: Verify bounded vision workspace candidate
+on:
+  push:
+    branches: [review/vision-workspace-candidate]
+    paths: [.github/workflows/workspace-candidate.yml, .review/workspace_apply.py]
+permissions:
+  contents: write
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply source-only changes with before and after guards
+        run: |
+          python .review/workspace_apply.py
+          git add src/app.js src/core.js src/visibility.js src/vision-worker.js src/diagnostics.js docs/HANDOFF.md
+          git diff --cached --check
+          cp .git/index /tmp/clean-workspace-index
+          GIT_INDEX_FILE=/tmp/clean-workspace-index git rm --cached .review/workspace_apply.py .github/workflows/workspace-candidate.yml
+          TREE=$(GIT_INDEX_FILE=/tmp/clean-workspace-index git write-tree)
+          echo "Clean tested tree: $TREE"
+          test "$TREE" = '16cf1497861976adf3feee2e4c6c196edf068328'
+          npm run check && npm test
+      - name: Publish verified source objects on this isolated branch only
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Apply evidence-equivalent reusable vision scratch and CPU diagnostics' -m '186 code tests and 72 exact legacy-output comparisons passed. Local detector/visibility median6.536ms to4.388ms; not proof of fixing browser stalls. Original media times and all score/referee gates unchanged. Exact clean tree16cf1497861976adf3feee2e4c6c196edf068328. Full PR browser suite still required.'
+          git push origin HEAD:refs/heads/review/vision-workspace-candidate
+      - name: Preserve source for verification
+        if: always()
+        run: git archive --format=tar $(git write-tree) > /tmp/workspace-candidate.tar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: workspace-candidate-source
+          path: /tmp/workspace-candidate.tar
+          retention-days: 1
