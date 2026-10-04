@@ -8,34 +8,42 @@ permissions:
 jobs:
   profile:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 4
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: |
-          python -m pip install playwright==1.57.0
-          python -m playwright install --with-deps chromium
-      - name: Same-run baseline and single-context experiment
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test avoiding the redundant full-resolution video readback
         run: |
-          python tests/frame_stage_profile.py
-          mv test-results/frame-stage-profile.json test-results/frame-stage-baseline.json
           python - <<'PY'
           from pathlib import Path
           import hashlib
           p=Path('src/app.js');s=p.read_text()
           assert hashlib.sha256(s.encode()).hexdigest()=='d58cf55c6513acc0aa90582a65b0eab25a9c3b769e599567888e77c536585f89'
-          old="rawCtx = raw.getContext('2d', { willReadFrequently: true })"
-          assert s.count(old)==1
-          p.write_text(s.replace(old,"rawCtx = raw.getContext('2d')"))
+          changes=[
+          ("  if (state.mode !== 'demo') rawCtx.drawImage(video, 0, 0, raw.width, raw.height);\n  ctx.drawImage(raw, 0, 0); drawOverlay();","  const source = state.mode === 'demo' ? raw : video;\n  ctx.drawImage(source, 0, 0, raw.width, raw.height); drawOverlay();"),
+          ('    smallCtx.drawImage(raw, 0, 0, small.width, small.height);','    smallCtx.drawImage(source, 0, 0, small.width, small.height);'),
+          ('  smallCtx.drawImage(raw, 0, 0, small.width, small.height); state.background =',"  smallCtx.drawImage(state.mode === 'demo' ? raw : video, 0, 0, small.width, small.height); state.background ="),
+          ('function sampleTeam(team) {\n',"function sampleTeam(team) {\n  if (['camera', 'file'].includes(state.mode) && video.readyState >= 2) rawCtx.drawImage(video, 0, 0, raw.width, raw.height);\n")]
+          for old,new in changes:
+              assert s.count(old)==1,old
+              s=s.replace(old,new)
+          assert hashlib.sha256(s.encode()).hexdigest()=='d9b755b488cf6f83fdce5fb16316ad8c9ac6ac165b4d3c79d0936116f55555a8'
+          p.write_text(s)
           PY
-          python tests/frame_stage_profile.py
-          mv test-results/frame-stage-profile.json test-results/frame-stage-render-context.json
-          git diff -- src/app.js
+          npm run check && npm test
+      - run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Measure the single-path change on a full real-browser camera round
+        run: python tests/frame_stage_profile.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frame-stage-ab-comparison
-          path: test-results/frame-stage-*.json
+          name: direct-capture-profile
+          path: test-results/frame-stage-profile.json
           retention-days: 3
