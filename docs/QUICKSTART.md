@@ -1,5 +1,13 @@
 # First game setup
 
+## Watch a full demo round
+
+Press **Watch a full round** on the board's welcome screen. No camera, permission prompt or calibration is needed. A scripted exhibition plays 16 alternating shots (eight per team) in about 68 seconds at normal speed, with draws, bumps, takeouts into the gutter and three banked 20s. The board is animated; the demo score, remaining shots, point ledger and shot log advance after each shot. It stops at the completed round instead of starting over silently.
+
+**Pause / Resume**, **½× / 1× / 2× speed**, **Skip to next shot** and **Replay round** control only the synthetic animation. **Next demo round** alternates the starting team. The round award uses the selected Difference or Match points mode. **Exit demo** restores the original match scores, names and layout. The demonstration never records clips or writes its scores to your saved match or clip library. Hiding the tab pauses the demo; Resume continues it. The original **quick demo** is still available for the short detector-driven example.
+
+This is an illustrative script, not a physics model or proof of legal shots, contact order, automatic 20 detection, or camera accuracy. Its 20s and shot count are supplied by the script. Real games retain the existing evidence checks and manual 20 confirmation.
+
 ## Automatic setup and normal play
 
 Connect the webcam on a computer browser. Keep the full board visible in a fixed view, including the outer printed circle. An angle around 45° is supported experimentally. Use even lighting, and compare camera-reported, observed and analysed frame rates; requested camera settings are not a guarantee.

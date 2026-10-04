@@ -9,6 +9,7 @@ import { installReviewControls } from './review-controls.js';
 import { invalidateBoardCorrections, validBoardCorrections } from './board-corrections.js';
 import { DiagnosticLog, diagnosticJSON } from './diagnostics.js';
 import { installLibraryControls } from './library-controls.js';
+import { FullRoundDemo } from './full-round-demo.js';
 const $ = id => document.getElementById(id);
 const board = $('board'), ctx = board.getContext('2d');
 const video = $('source-video'), raw = document.createElement('canvas'), rawCtx = raw.getContext('2d', { willReadFrequently: true });
@@ -16,7 +17,7 @@ const small = document.createElement('canvas'), smallCtx = small.getContext('2d'
 const smart = document.createElement('canvas'), smartCtx = smart.getContext('2d', { willReadFrequently: true });
 const MB = 1024 * 1024, MAX_CLIP = 64 * MB, MAX_TOTAL = 256 * MB, MAX_CLIPS = 120;
 let previewMatch = null;
-let game, reviewControls, library;
+let game, reviewControls, library, fullDemo;
 const diagnostics=new DiagnosticLog();
 const state = { matchId:crypto.randomUUID(),storageReady:false,lastVisibility:null,clusterCandidates:[], mode: 'idle', token: 0, generation: 0, stream: null, sourceURL: null, callback: null, raf: null, calibration: null, projection: null, background: null, colors: [null, null], discs: [], contacts: [], calibrationPoints: null, sampleTeam: null, smartBusy: false, inflight: false, time: 0, lastTime: null, gaps: [], observed: 0, analysed: 0, statStart: performance.now(), fps: 0, analysisFps: 0, clips: [], selected: null, recording: null, settings: {}, names: ['Team A', 'Team B'], scores: [0, 0], totals: [0, 0], rounds: [], undo: [], round: 1, demoStart: 0, auto: { corrections:[],twenties: [0, 0], adjustments: [0, 0], reviewHold: false, awaitingClear: false, shotCount: 0, activeShotNumber: null, lastResult: null, lastLiveScore: null, stopTimer: null } };
 const clipBuffer = new RollingClipBuffer({
@@ -60,7 +61,7 @@ try {
     if (m.type === 'error') { notify(`Tracking stopped: ${m.message}. Recording and manual scoring remain available.`, true); worker.terminate(); worker = null; clipBuffer.stop(); return; }
     if(m.type==='colours'){game.colours(m);return;}
     state.lastVisibility=m.visibility;state.clusterCandidates=m.detectionEvidence?.clusterCandidates||[];
-    if(m.visibility?.viewObstructed)state.auto.reviewHold=true;
+    if(m.visibility?.viewObstructed&&!fullDemo?.active)state.auto.reviewHold=true;
     state.analysed++; state.discs = m.discs;
     $('disc-count').textContent = String(m.discs.length);
     for (const event of m.contacts) {
@@ -71,6 +72,8 @@ try {
     if (m.contacts.length) {
       const e = m.contacts[0]; $('contact-status').textContent = `${state.mode === 'demo' ? 'SIMULATED · ' : ''}Possible contact: disc ${e.ids[0]} ↔ ${e.ids[1]}. Proximity only; impact and first-contact order need human review.`;
     }
+    // Scripted demonstration scores are explicitly separate from vision evidence.
+    if (fullDemo?.active) { diagnostics.push(m); return; }
     if (m.auto) handleAutoUpdate(m.auto);
     diagnostics.push(m);game.onFrame(m);renderPlayStatus();
   };
@@ -106,6 +109,7 @@ function updateControls() {
   $('calibrate').disabled = !active || busy || smartBusy; $('auto-calibrate').disabled = !active || busy || calibrating || smartBusy; $('background').disabled = !state.calibration || busy || calibrating || smartBusy;
   $('sample-a').disabled = !state.background || busy || calibrating; $('sample-b').disabled = !state.background || busy || calibrating;
   ['camera', 'capture-mode', 'calibration-mode', 'import-video', 'import-button', 'tolerance', 'refresh-cameras'].forEach(id => { $(id).disabled = busy || smartBusy; });
+  $('demo-round').disabled = busy;
   $('demo').disabled = busy; $('cancel-calibrate').hidden = !calibrating && state.sampleTeam === null;
   $('tracking-status').textContent = !worker ? 'Tracking unavailable in this browser' : readyToTrack() ? 'Continuous puck tracking ready · analysing delivered frames' : !state.calibration ? 'Waiting for calibration' : !state.background ? 'Next: save an empty board' : ($('auto-colours').checked?'Next: show one still puck of each colour':'Next: sample both team colours');
   $('calibration-status').textContent = state.calibration ? `${Number.isFinite(state.projection?.autoConfidence) ? 'Smart fit' : state.projection ? 'Perspective fit' : state.mode === 'demo' ? 'Demo geometry' : 'Overhead fit'} · ${Math.round(state.calibration.discRadius * 2)} px puck diameter${state.projection ? ' in corrected view' : ''}` : state.smartBusy ? 'Finding board automatically…' : 'Not calibrated';
@@ -201,6 +205,7 @@ function stopSource() {
   if (state.recording) { notify('Finish the current clip before changing the camera or source.', true); return false; }
   clipBuffer.stop(); clipBuffer.failure = null;
   guide.cancel();
+  fullDemo?.stop();
   exitPreview();
   state.token++;
   if (state.callback !== null && video.cancelVideoFrameCallback) video.cancelVideoFrameCallback(state.callback);
@@ -393,7 +398,7 @@ function paintDemo(t, empty = false) {
   circle(480, 572 - moving * 240, 14, `rgb(${a})`); circle(480, 400 - hit * 200, 14, `rgb(${b})`);
   circle(620, 290, 14, `rgb(${a})`); circle(340, 410, 14, `rgb(${b})`);
 }
-function startDemo() {
+function startDemo(fullRound = false) {
   if (!stopSource()) return;
   enterPreview(); state.mode = 'demo'; resize(960, 720);
   state.calibration = makeCalibration([{ x: 480, y: 360 }, { x: 574, y: 360 }, { x: 665, y: 360 }, { x: 740, y: 360 }, { x: 620, y: 290 }, { x: 634, y: 290 }], 960, 720);
@@ -401,7 +406,9 @@ function startDemo() {
   state.colors = [[46, 113, 143], [168, 64, 54]]; state.demoStart = performance.now();
   $('welcome').hidden = true; $('demo-label').hidden = false; $('source-badge').textContent = 'DEMO · simulated board'; $('reported-fps').textContent = 'Synthetic';
   $('stage-hint').textContent = 'Synthetic motion through the same detector. This does not validate real-camera accuracy.';
-  configureWorker(); const token = state.token;
+  configureWorker();
+  if(fullRound){fullDemo.start();$('source-badge').textContent='DEMO · full scripted round';$('stage-hint').textContent='Scripted exhibition: score and 20s come from the simulation, not camera verdicts.';notify('Full-round demo only. No camera, recording, or changes to your saved match.');return;}
+  const token = state.token;
   const tick = now => { if (state.mode !== 'demo' || token !== state.token) return; if (!state.calibrationPoints && state.sampleTeam === null) paintDemo((now - state.demoStart) / 1000); processFrame((now - state.demoStart) / 1000, now); state.raf = requestAnimationFrame(tick); };
   state.raf = requestAnimationFrame(tick); notify('Demo only: synthetic discs, synthetic motion. Your manual match scores are unchanged.');
 }
@@ -569,6 +576,7 @@ function renderScore() {
   game?.renderPalette();reviewControls?.render();renderPlayStatus();
 }
 function renderPlayStatus(){
+  if(fullDemo?.active){fullDemo.renderStatus();return;}
   if(!$('play-score'))return;
   $('play-score').textContent=`${state.names[0]} ${state.scores[0]} — ${state.scores[1]} ${state.names[1]} · Round ${state.round}`;
   $('play-state').textContent=state.recording?'Recording shot':state.lastVisibility?.viewObstructed?'Review · unresolved board region':state.auto.reviewHold?'Review needed':state.auto.activeShotNumber!==null?'Shot in motion':!readyToTrack()?'Complete table setup':state.auto.awaitingClear?'Clear board for next round':'Ready for next shot';
@@ -577,7 +585,7 @@ function renderPlayStatus(){
 $('toggle-play').onclick=()=>{const enabled=document.body.classList.toggle('play-mode');$('toggle-play').textContent=enabled?'Show table setup':'Play view';$('toggle-play').setAttribute('aria-pressed',String(enabled));renderPlayStatus();};
 $('play-review').onclick=()=>{document.body.classList.remove('play-mode');$('toggle-play').textContent='Play view';$('toggle-play').setAttribute('aria-pressed','false');$('review-board').open=true;$('review-board').scrollIntoView({block:'center'});};
 $('export-diagnostics').onclick=()=>{download(new Blob([diagnosticJSON({schema:1,exportedAt:new Date().toISOString(),appVersion:VERSION,activeConfiguration:configSnapshot(),observations:diagnostics.snapshot(),roundTracking:game.snapshot(),containsEmptyBoardImage:true,footageUploaded:false})],{type:'application/json'}),'crokinole-diagnostics.json');};
-$('connect').onclick = connect; $('refresh-cameras').onclick = listCameras; $('stop-source').onclick = stopSource; $('demo').onclick = startDemo;
+$('connect').onclick = connect; $('refresh-cameras').onclick = listCameras; $('stop-source').onclick = stopSource; $('demo').onclick = () => startDemo(); $('demo-round').onclick = () => startDemo(true);
 $('auto-calibrate').onclick = () => smartCalibrate(false); $('calibrate').onclick = startCalibration; $('cancel-calibrate').onclick = cancelCalibration; $('background').onclick = saveBackground;
 $('sample-a').onclick = () => sampleTeam(0); $('sample-b').onclick = () => sampleTeam(1);
 $('tolerance').oninput = () => { $('tolerance-value').value = $('tolerance').value; configureWorker(); };
@@ -617,9 +625,10 @@ $('finish-round').onclick=()=>finishRound(false);
 $('undo-score').onclick = () => { const previous = state.undo.pop(); if (previous) { const { mode, boardCorrections,roundTracking, autoTwenties, autoAdjustments, autoReviewHold, autoShotCount, ...values } = JSON.parse(previous); if(roundTracking&&values.round!==state.round)game.restore(roundTracking); Object.assign(state, values);if(validBoardCorrections(boardCorrections))state.auto.corrections=boardCorrections; if (Array.isArray(autoTwenties)) state.auto.twenties = autoTwenties; if(Array.isArray(autoAdjustments))state.auto.adjustments=autoAdjustments;state.auto.reviewHold=!!autoReviewHold;$('auto-scoring').checked=false; if (Number.isSafeInteger(autoShotCount)) state.auto.shotCount = autoShotCount; $('score-mode').value = mode; saveMatch(); renderScore(); } };
 $('score-mode').onchange = saveMatch;
 $('new-match').onclick = () => { if(state.recording||state.auto.activeShotNumber!==null)return notify('Finish the current shot first.',true); if (!confirm('Start a new match? Scores and round history will reset. Clips remain in this tab.')) return; snapshotScore();state.matchId=crypto.randomUUID(); state.scores = [0, 0]; state.totals = [0, 0]; state.rounds = []; state.round = 1; resetAutoRound(); saveMatch(); renderScore(); };
-document.addEventListener('visibilitychange', () => { if (document.hidden && state.recording) { state.recording.trackingGaps++; notify('Tab hidden: tracking may pause. Recording may continue, but contact evidence can be incomplete.', true); } resetStats(); configureWorker(); });
+document.addEventListener('visibilitychange', () => { if(fullDemo?.active){fullDemo.visibilityChanged();return;} if (document.hidden && state.recording) { state.recording.trackingGaps++; notify('Tab hidden: tracking may pause. Recording may continue, but contact evidence can be incomplete.', true); } resetStats(); configureWorker(); });
 window.addEventListener('beforeunload', e => { if (library?.hasUnsaved() || state.recording) { e.preventDefault(); e.returnValue = ''; } });
 window.addEventListener('pagehide', () => { clipBuffer.stop(); state.stream?.getTracks().forEach(t => t.stop()); });
 game=installGameAutomation({state,getCalibration:analysisCalibration,readyToTrack,reconfigure:configureWorker,updateControls,saveMatch,finishRound,notify});
 reviewControls=installReviewControls({state,board,getCalibration:analysisCalibration,toAnalysis:p=>state.projection?projectPoint(state.projection.imageToBoard,p):{x:p.x*small.width/board.width,y:p.y*small.width/board.width},snapshotScore,saveMatch,renderScore,notify});
+fullDemo=new FullRoundDemo({state,processFrame,renderScore,exit:stopSource,paint:discs=>{paintDemo(0,true);for(const d of discs){rawCtx.save();rawCtx.globalAlpha=d.opacity??1;circle(d.x,d.y,d.r,`rgb(${state.colors[d.team]})`);rawCtx.restore();}}});
 loadMatch();renderScore();library=installLibraryControls({state,renderClips,updateControls,payload:sessionPayload,download,notify});updateControls();listCameras();
