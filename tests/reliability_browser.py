@@ -16,6 +16,7 @@ with sync_playwright() as pw:
     for angled in [False,True]:
         ctx=browser.new_context(viewport={'width':1440,'height':1100},accept_downloads=True)
         page=ctx.new_page();page.on('pageerror',lambda e:errors.append(str(e)));page.on('dialog',lambda d:d.accept())
+        page.add_init_script((ROOT/'tests/capture_timing_probe.js').read_text())
         page.add_init_script((ROOT/'tests/synthetic_camera.js').read_text());page.goto(base,wait_until='networkidle')
         expect(page.locator('#local-storage-status')).to_have_attribute('data-ready','true')
         page.evaluate('(a)=>{syntheticCamera.angled=a;syntheticCamera.mode="empty"}',angled)
@@ -42,7 +43,8 @@ with sync_playwright() as pw:
                 expect(page.locator('#buffer-status')).to_have_attribute('data-ready','true',timeout=15000)
                 page.evaluate('(team)=>syntheticCamera.placeFullPuck(team)',team);page.wait_for_timeout(450)
                 page.evaluate('syntheticCamera.flickRoundPuck()');total+=1
-                expect(page.locator('#clip-count')).to_have_text(str(total),timeout=20000)
+                try:expect(page.locator('#clip-count')).to_have_text(str(total),timeout=20000)
+                finally:(OUT/f'capture-full-{angled}.json').write_text(json.dumps(page.evaluate('captureProbe.checkpoint()'),indent=2))
                 # Inspect persisted match rather than injecting expected detector output.
                 if shot<15:
                     expect(page.locator('#round-status')).to_contain_text(f'Round {round_index+1}')

@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import {DemoRound} from '../src/demo-round.js';
 import {DEMO_BOARD as B} from '../src/demo-physics.js';
 // Regression fixture from the new physical sequence, not forced outcome inputs.
-const expected=[[20,0],[20,15],[35,10],[35,25],[35,20],[30,35],[30,35],[20,50],[30,50],[30,55],[35,60],[25,70],[30,65],[30,70],[30,65],[25,70]];
+const expected=[[20,0],[20,15],[35,10],[35,25],[35,20],[30,35],[45,35],[45,50],[55,50],[40,65],[55,65],[50,80],[65,65],[65,75],[75,75],[70,90]];
 
 test('16 alternating launches produce scores from the settled physical world',()=>{
  const r=new DemoRound();assert.deepEqual(r.at(0).discs,[]);
  for(let i=0;i<16;i++){const f=r.at(r.stages[i].endTime);assert.equal(f.completed,i+1);assert.deepEqual(f.scores,expected[i]);assert.equal(f.history[i].team,i%2);assert.equal(f.source,'physics-demo');}
- const f=r.at(r.duration);assert.equal(f.phase,'complete');assert.deepEqual(f.used,[8,8]);assert.deepEqual(f.twenties,[1,0]);assert.deepEqual(f.boardScores,[5,70]);assert.deepEqual(f.awarded,[0,45]);
- assert.equal(f.discs.length+f.twenties.reduce((a,b)=>a+b),16);assert.ok(r.duration<80);
+ const f=r.at(r.duration);assert.equal(f.phase,'complete');assert.deepEqual(f.used,[8,8]);assert.deepEqual(f.twenties,[1,0]);assert.deepEqual(f.boardScores,[50,90]);assert.deepEqual(f.awarded,[0,20]);
+ assert.equal(r.stages.at(-1).dispositions.length,16);assert.ok(r.duration<80);
 });
 test('every solved frame respects the same eight peg footprints that are rendered',()=>{
  const r=new DemoRound();let checks=0;
@@ -35,7 +35,7 @@ test('replay, display cadence and playback speed do not change the physics',()=>
 test('next round swaps team roles without changing physical outcomes, with shared match scoring',()=>{
  const r=new DemoRound({starter:1,round:2});
  for(let i=0;i<16;i++)assert.deepEqual(r.at(r.stages[i].endTime).scores,[...expected[i]].reverse());
- assert.deepEqual(r.at(r.duration).awarded,[45,0]);
+ assert.deepEqual(r.at(r.duration).awarded,[20,0]);
  const m=new DemoRound({mode:'match'});assert.deepEqual(m.at(m.duration).awarded,[0,2]);
 });
 test('skip, final hold and invalid inputs remain bounded',()=>{

@@ -22,6 +22,7 @@ with sync_playwright() as pw:
     for angled in [False,True]:
         context=browser.new_context(viewport={'width':1440,'height':1100},accept_downloads=True)
         page=context.new_page();page.on('pageerror',lambda e:errors.append(str(e)));page.on('dialog',lambda d:d.accept())
+        page.add_init_script((ROOT/'tests/capture_timing_probe.js').read_text())
         page.add_init_script('''(()=>{
           const NativeWorker=window.Worker;window.roundTiming=[];
           window.Worker=class extends NativeWorker {
@@ -78,6 +79,7 @@ with sync_playwright() as pw:
                 expected=[(i+2)//2,(i+1)//2]
                 expect(page.locator('#auto-round-status')).to_have_attribute('data-used',','.join(map(str,expected)))
             # This positive proof requires clean automatic scoring, not manual confirmation.
+            (OUT/f'capture-short-{angled}-{i}.json').write_text(json.dumps(page.evaluate('captureProbe.checkpoint()'),indent=2))
             assert not event['hadFrameGap'],'Camera timing gap: positive automatic-round proof not established'
         expect(page.locator('#round-status')).to_contain_text('Round 2',timeout=5000)
         expect(page.locator('.round-entry').first).to_contain_text('20 – 20')

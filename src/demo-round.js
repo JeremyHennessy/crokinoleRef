@@ -1,12 +1,13 @@
 import { clamp, roundResult } from './core.js';
 import { scoreSettledBoard } from './auto-referee.js';
+import { resolveDemoShot } from './demo-rules.js?rules=1';
 import { DEMO_BOARD as B, DemoPhysics, PHYSICS_STEP, circleImpactTime } from './demo-physics.js?physics=1';
 
 /** Repeatable launch choices feed the demo-only physical world. No destinations,
  * contact partners, final scores, removals, or 20s are assigned by a script. */
 export const DEMO_CALIBRATION=Object.freeze({center:Object.freeze({x:B.x,y:B.y}),rings:Object.freeze([94,185,260]),discRadius:B.puckRadius,width:960,height:720});
 export const DEMO_INTRO_SECONDS=1.2, DEMO_SHOTS=16;
-const LINEUP=.65, SETTLE=.65;
+const LINEUP=.65, SETTLE=.65, REMOVAL=.65;
 const powers=[35,0,205,260,340,145,250,315,190,340,200,285,345,155,320,210];
 const cuts=[0,0,0,15,-12,8,-16,0,12,-8,0,17,-9,0,13,-15];
 const copy=ds=>ds.map(d=>({...d}));
@@ -42,7 +43,7 @@ function planLaunch(world,role,index){
   return best;
 }
 function picture(world){
-  return world.snapshot().map(d=>({...d,opacity:d.pocketed?clamp(1-(world.time-d.enteredAt)/.22,0,1):1})).filter(d=>d.opacity>0);
+  return world.snapshot().filter(d=>d.status!=='removed').map(d=>({...d,opacity:d.pocketed?clamp(1-(world.time-d.enteredAt)/.22,0,1):1})).filter(d=>d.opacity>0);
 }
 function outcome(events,intent){
   const parts=[];
@@ -66,12 +67,17 @@ export class DemoRound {
       const lineup=[...before,{...launch,vx:0,vy:0,status:'board'}],frames=[picture(world)];
       let steps=0;
       do {world.step();frames.push(picture(world));if(++steps>8/PHYSICS_STEP)throw Error('Demo did not settle naturally.');} while(world.moving());
-      const motionTime=steps*PHYSICS_STEP;timeline+=LINEUP+motionTime+SETTLE;
+      const motionTime=steps*PHYSICS_STEP;
+      const events=world.events.slice(eventIndex).map(e=>({...e,time:e.time-simStart}));
+      const rules=resolveDemoShot({before,after:world.discs,shooterId:launch.id,events,center:DEMO_CALIBRATION.center,innerRadius:94,outerRadius:260});
+      const unsettledDisplay=picture(world);world.discs=rules.discs;
+      timeline+=LINEUP+motionTime+SETTLE+(rules.removals.length?REMOVAL:0);
       const twenties=[0,0];world.discs.forEach(d=>{if(d.status==='hole')twenties[d.team]++;});
       used[launch.team]++;
-      const events=world.events.slice(eventIndex).map(e=>({...e,time:e.time-simStart}));
       const score=scoreSettledBoard(boardDiscs(world),DEMO_CALIBRATION,twenties);
-      this.stages.push({id:i+1,team:launch.team,startTime,endTime:timeline,motionTime,launch: {...launch},lineup,frames,after:picture(world),events,twenties:[...twenties],used:[...used],score,title:outcome(events,launch.intent),intent:launch.intent});
+      const cleared=rules.removals.filter(d=>d.previousStatus==='board');
+      const ruleCaption=!rules.valid?'Invalid shot: '+rules.reason+' — involved own discs removed':cleared.length?'Stopped outer-line disc'+(cleared.length===1?'':'s')+' removed before the next shot':rules.reason;
+      this.stages.push({id:i+1,team:launch.team,startTime,endTime:timeline,motionTime,launch: {...launch},lineup,frames,unsettledDisplay,after:picture(world),dispositions:world.snapshot(),events,rules,ruleCaption,twenties:[...twenties],used:[...used],score,title:outcome(events,launch.intent)+(rules.removals.length?' · '+ruleCaption:''),intent:launch.intent});
     }
     this.duration=timeline;
   }
@@ -80,17 +86,21 @@ export class DemoRound {
     const time=clamp(seconds,0,this.duration);
     let completed=this.stages.findIndex(s=>time<s.endTime-1e-8);if(completed<0)completed=16;
     const prev=this.stages[completed-1],current=this.stages[completed];
-    const base={time,round:this.round,completed,used:prev?[...prev.used]:[0,0],remaining:prev?prev.used.map(n=>8-n):[8,8],twenties:prev?[...prev.twenties]:[0,0],scores:prev?[...prev.score.totals]:[0,0],boardScores:prev?[...prev.score.visible]:[0,0],history:this.stages.slice(0,completed).map(s=>({shot:s.id,team:s.team,title:s.title,scores:[...s.score.totals],twenty:s.events.some(e=>e.type==='hole')})),source:'physics-demo',phase:'ready',team:current?.team??null,title:current?.intent??'Round finished',contacts:[]};
+    const base={time,round:this.round,completed,used:prev?[...prev.used]:[0,0],remaining:prev?prev.used.map(n=>8-n):[8,8],twenties:prev?[...prev.twenties]:[0,0],scores:prev?[...prev.score.totals]:[0,0],boardScores:prev?[...prev.score.visible]:[0,0],history:this.stages.slice(0,completed).map(s=>({shot:s.id,team:s.team,title:s.title,scores:[...s.score.totals],twenty:s.rules.valid&&s.events.some(e=>e.type==='hole'),valid:s.rules.valid,removals:s.rules.removals.map(d=>({...d}))})),source:'physics-demo',phase:'ready',team:current?.team??null,title:current?.intent??'Round finished',contacts:[]};
     if(completed===16)return {...base,phase:'complete',discs:copy(prev.after),awarded:roundResult(...base.scores,this.mode)};
     if(time<DEMO_INTRO_SECONDS)return {...base,discs:[],title:'Clear board · eight shots per team'};
     const local=time-current.startTime;
     if(local<LINEUP)return {...base,discs:copy(current.lineup)};
     const t=local-LINEUP,index=Math.min(current.frames.length-1,Math.floor((t+1e-8)/PHYSICS_STEP));
-    const phase=t<current.motionTime?'shooting':'settling';
+    const phase=t<current.motionTime?'shooting':t<current.motionTime+SETTLE?'settling':'clearing';
     // Use solved fixed-step poses, never lerp a chord through a collision.
     const ds=copy(current.frames[index]).filter(d=>!d.pocketed||t<current.motionTime);
+    if(phase==='clearing'){
+      const removed=new Set(current.rules.removals.filter(d=>d.previousStatus==='board').map(d=>d.id));
+      for(const d of ds)if(removed.has(d.id))d.opacity=clamp(1-(t-current.motionTime-SETTLE)/REMOVAL,0,1);
+    }
     const contacts=current.events.filter(e=>e.time<=t&&t-e.time<.16&&(e.type==='disc'||e.type==='peg')).map(e=>({...e}));
-    return {...base,phase,discs:ds,contacts,title:phase==='settling'?current.title:current.intent};
+    return {...base,phase,discs:ds,contacts,title:phase==='clearing'?current.ruleCaption:phase==='settling'?current.title:current.intent};
   }
   nextShotTime(seconds){const f=this.at(seconds);return this.stages[f.completed]?.endTime??this.duration;}
 }

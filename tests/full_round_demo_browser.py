@@ -9,7 +9,7 @@ server=http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(Handler
 threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}/'
 checks=[];errors=[]
 def passed(s):checks.append(s);print('PASS',s,flush=True)
-expected=['20,0','20,15','35,10','35,25','35,20','30,35','30,35','20,50','30,50','30,55','35,60','25,70','30,65','30,70','30,65','25,70']
+expected=['20,0','20,15','35,10','35,25','35,20','30,35','45,35','45,50','55,50','40,65','55,65','50,80','65,65','65,75','75,75','70,90']
 def database(page):
     return page.evaluate('''async()=>{const {ClipStore}=await import('./src/local-library.js');const s=new ClipStore();const data={matches:await s.matches(),clips:await Promise.all((await s.clips()).map(async c=>({...c,blob:await c.blob.text()})))};s.close();return data;}''')
 with sync_playwright() as pw:
@@ -36,20 +36,20 @@ with sync_playwright() as pw:
     passed('Full demo starts on an empty board without calibration and pause freezes its shot count')
     page.locator('#demo-speed').select_option('2');page.locator('#demo-pause').click()
     expect(panel).to_have_attribute('data-completed','16',timeout=60000)
-    expect(panel).to_have_attribute('data-score','25,70');expect(panel).to_have_attribute('data-phase','complete')
-    expect(page.locator('#demo-result')).to_contain_text('A 0 · B 45')
+    expect(panel).to_have_attribute('data-score','70,90');expect(panel).to_have_attribute('data-phase','complete')
+    expect(page.locator('#demo-result')).to_contain_text('A 0 · B 20')
     expect(page.locator('#demo-ledger')).to_contain_text('Banked 20s: A 1 · B 0')
     page.wait_for_timeout(750);expect(panel).to_have_attribute('data-completed','16')
     assert page.locator('#demo-shot-log li').count()==16
     page.screenshot(path=str(OUT/'full-demo-finished.png'),full_page=True)
-    passed('Unassisted autoplay at 2× completes all 16 shots, scores 25–70 and awards the 45-point margin once')
+    passed('Unassisted autoplay at 2× completes all 16 shots, scores 70–90 and awards the 20-point margin once')
     guided=page.locator('#board').evaluate('(canvas)=>canvas.toDataURL()')
     page.locator('#overlays').uncheck();page.wait_for_timeout(100)
     plain=page.locator('#board').evaluate('(canvas)=>canvas.toDataURL()')
     assert guided!=plain,'Guides must change rendered pixels, including while the completed round is held'
     page.locator('#overlays').check();page.wait_for_timeout(100)
     assert page.locator('#board').evaluate('(canvas)=>canvas.toDataURL()')==guided
-    expect(panel).to_have_attribute('data-score','25,70')
+    expect(panel).to_have_attribute('data-score','70,90')
     passed('Existing Guides switch removes and restores the overlay without changing the simulated result')
     assert page.evaluate("localStorage.getItem('crokinole-ref-match-v1')")==original
     assert database(page)==stored
@@ -58,12 +58,13 @@ with sync_playwright() as pw:
     page.locator('#demo-pause').click()
     for i,score in enumerate(expected):
         page.locator('#demo-next-shot').click();expect(panel).to_have_attribute('data-completed',str(i+1));expect(panel).to_have_attribute('data-score',score)
-    expect(page.locator('#demo-result')).to_contain_text('Demo match total: 0–45')
+    expect(page.locator('#demo-result')).to_contain_text('Demo match total: 0–20')
+    expect(page.locator('#demo-shot-log')).to_contain_text('Stopped outer-line disc removed before the next shot')
     passed('Replay clears the demo result; skip control reproduces every independently expected intermediate score')
     page.locator('#demo-next-round').click();expect(panel).to_have_attribute('data-round','2')
     expect(page.locator('#demo-round-status')).to_contain_text('Red / B');page.locator('#demo-pause').click()
     for i in range(16):page.locator('#demo-next-shot').click()
-    expect(panel).to_have_attribute('data-score','70,25');expect(page.locator('#demo-result')).to_contain_text('Demo match total: 45–45')
+    expect(panel).to_have_attribute('data-score','90,70');expect(page.locator('#demo-result')).to_contain_text('Demo match total: 20–20')
     passed('Next demo round alternates the starter and adds the second award without duplicating the first')
     page.set_viewport_size({'width':390,'height':844})
     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
