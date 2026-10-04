@@ -30,6 +30,8 @@ with sync_playwright() as pw:
         passed(f'{angled=}: smart board fit + automatic colours + measured puck radius without calibration clicks')
         page.evaluate('syntheticCamera.clearRound()');page.wait_for_timeout(1000)
         page.locator('#toggle-play').click();expect(page.locator('.setup')).to_be_hidden()
+        for field in ['format-preset','starting-team']:
+            assert page.locator('#'+field).bounding_box()['width'] >= 160, 'Game-format controls must remain readable'
         page.screenshot(path=str(OUT/f'play-view-{angled}.png'),full_page=True)
         total=0
         for round_index in range(2):
@@ -80,6 +82,8 @@ with sync_playwright() as pw:
         if angled:
             page.set_viewport_size({'width':390,'height':844});page.locator('#toggle-play').click()
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+            for field in ['format-preset','starting-team','round-allocation']:
+                assert page.locator('#'+field).bounding_box()['width'] >= 160, 'Mobile format fields cannot shrink to arrows'
             page.screenshot(path=str(OUT/'play-mobile.png'),full_page=True)
             page.locator('#play-review').click();expect(page.locator('#review-board')).to_have_attribute('open','')
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
