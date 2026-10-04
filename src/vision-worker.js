@@ -51,12 +51,14 @@ self.onmessage = ({ data: m }) => {
         learned=learner.update(visible.viewObstructed?[]:candidates,m.time);
       }
       if(learned.colors){colors=learned.colors;if(learned.measurement){calibration={...calibration,discRadius:learned.measurement.radius,radiusUncertainty:learned.measurement.uncertainty,radiusSource:learned.measurement.source};referee.setCalibration(calibration);}tracker.reset();referee.resetRound();}
-      self.postMessage({type:'colours',generation,...learned});return;
+      self.postMessage({type:'colours',generation,time:m.time,...learned});return;
     }
     const evidence = detectDiscEvidence(pixels, background, width, height, calibration, colors, tolerance, detectionWorkspace);
     const detections=evidence.discs;
     const detected=performance.now();
-    const tracking = tracker.update(detections, m.time);const tracked=performance.now();
+    const tracking = tracker.update(detections, m.time);
+    if(m.captureGap){tracking.frameGap=true;tracking.discontinuity=true;}
+    const tracked=performance.now();
     const visibility = assessVisibility(pixels, background, width, height, calibration, tracking.discs, visibilityWorkspace);
     if(evidence.unresolved.length)visibility.viewObstructed=true;
     const visible=performance.now();

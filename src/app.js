@@ -9,6 +9,7 @@ import { installReviewControls } from './review-controls.js';
 import { invalidateBoardCorrections, validBoardCorrections } from './board-corrections.js';
 import { DiagnosticLog, diagnosticJSON } from './diagnostics.js?workspace=1';
 import { installLibraryControls } from './library-controls.js';
+import { CapturedFrameQueue } from './frame-queue.js';
 import { FullRoundDemo } from './full-round-demo.js?physics=1';
 import { DEMO_BOARD } from './demo-physics.js?physics=1';
 const $ = id => document.getElementById(id);
@@ -54,12 +55,13 @@ const guide = new CalibrationGuide({
   }
 });
 let worker;
+const frameQueue=new CapturedFrameQueue(frame=>{state.inflight=true;worker.postMessage(frame,[frame.buffer]);});
 try {
-  worker = new Worker(new URL('./vision-worker.js?workspace=1', import.meta.url), { type: 'module' });
+  worker = new Worker(new URL('./vision-worker.js?queue=1', import.meta.url), { type: 'module' });
   worker.onmessage = ({ data: m }) => {
     if (m.generation !== state.generation) return;
-    state.inflight = false;
-    if (m.type === 'error') { notify(`Tracking stopped: ${m.message}. Recording and manual scoring remain available.`, true); worker.terminate(); worker = null; clipBuffer.stop(); return; }
+    if (m.type === 'error') { notify(`Tracking stopped: ${m.message}. Recording and manual scoring remain available.`, true); frameQueue.reset(state.generation);state.inflight=false;worker.terminate(); worker = null; clipBuffer.stop(); return; }
+    if(!frameQueue.acknowledge(m))return;state.inflight=frameQueue.busy;
     if(m.type==='colours'){game.colours(m);return;}
     state.lastVisibility=m.visibility;state.clusterCandidates=m.detectionEvidence?.clusterCandidates||[];
     if(m.visibility?.viewObstructed&&!fullDemo?.active)state.auto.reviewHold=true;
@@ -78,7 +80,7 @@ try {
     if (m.auto) handleAutoUpdate(m.auto);
     diagnostics.push(m);game.onFrame(m);renderPlayStatus();
   };
-  worker.onerror = () => { state.inflight = false; worker?.terminate(); worker = null; clipBuffer.stop(); notify('Vision worker unavailable. Camera, replay and manual scoring can still be used.', true); };
+  worker.onerror = () => { frameQueue.reset(state.generation);state.inflight = false; worker?.terminate(); worker = null; clipBuffer.stop(); notify('Vision worker unavailable. Camera, replay and manual scoring can still be used.', true); };
 } catch { notify('This browser cannot start the tracking worker. Recording and manual scoring remain available.', true); }
 function notify(message, error = false) { $('notice').textContent = message; $('notice').classList.toggle('error', error); }
 function configSnapshot() { return { analysisFixture:state.background?{width:small.width,height:small.height,calibration:analysisCalibration(),background:state.background,warpMatrix:state.projection?samplingMatrix(state.projection,small.width/board.width):null}:null, calibration: state.calibration, projection: state.projection, analysisCoordinates: state.projection ? 'rectified-board-plane-640' : 'scaled-camera-image', colors: state.colors, tolerance: +$('tolerance').value, source: state.mode, cameraReports: state.settings, version: VERSION }; }
@@ -95,7 +97,7 @@ function configureWorker() {
   state.auto.lastLiveScore=null;state.clusterCandidates=[];state.lastVisibility=null;
   $('apply-reviewed-score').disabled=true;
   if(state.recording?.auto){state.recording.error=true;finishClip();}
-  state.generation++; state.inflight = false; state.discs = []; state.contacts = []; $('disc-count').textContent = '—';
+  state.generation++; frameQueue.reset(state.generation);state.inflight = false; state.discs = []; state.contacts = []; $('disc-count').textContent = '—';
   const scale = small.width / board.width;
   worker?.postMessage({ type: 'configure', generation: state.generation, calibration: analysisCalibration(), warp: state.projection ? { matrix: samplingMatrix(state.projection, scale), width: small.width, height: small.height } : null, requireEmpty: state.auto.awaitingClear, background: state.background, colors: state.colors, autoColours: $('auto-colours').checked, tolerance: +$('tolerance').value });
   $('contact-status').textContent = 'First-contact order is not verified. Proximity candidates are not referee decisions.';
@@ -289,11 +291,10 @@ function processFrame(time, now) {
   if (state.calibrationPoints || state.sampleTeam !== null) return;
   if (state.mode !== 'demo') rawCtx.drawImage(video, 0, 0, raw.width, raw.height);
   ctx.drawImage(raw, 0, 0); drawOverlay();
-  if ((readyToTrack() || (worker && state.calibration && state.background && $('auto-colours').checked)) && !state.inflight && !document.hidden) {
+  if ((readyToTrack() || (worker && state.calibration && state.background && $('auto-colours').checked)) && !document.hidden) {
     smallCtx.drawImage(raw, 0, 0, small.width, small.height);
     const image = smallCtx.getImageData(0, 0, small.width, small.height);
-    state.inflight = true;
-    worker.postMessage({ type: 'frame', generation: state.generation, time, width: small.width, height: small.height, buffer: image.data.buffer }, [image.data.buffer]);
+    frameQueue.push({ type: 'frame', generation: state.generation, time, width: small.width, height: small.height, buffer: image.data.buffer });
   }
   if (now - state.statStart >= 1000) {
     const elapsed = (now - state.statStart) / 1000;
