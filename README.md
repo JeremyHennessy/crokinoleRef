@@ -58,3 +58,13 @@ No scheduled workflows: Actions runs only for code changes, pull requests, or ex
 ## Automation review
 
 The worker and UI now share analysis-space calibration. Demo and imported-video sessions use isolated preview scores and never overwrite the saved live match. Confirmed +20 entries and other manual point adjustments survive subsequent automatic scores. Undo pauses automatic scoring; review a held board with **Use reviewed board score** before resuming. A new round waits for the board to clear. No calibrated accuracy percentage is claimed. See `docs/VERIFICATION.md` for the tested scope.
+
+## Automatic teams and round completion
+
+After saving the empty-board reference, show one separated, stationary puck of each colour and remove your hands. The local worker checks foreground shape, two distinct colour groups, and stability across multiple frames; it assigns and locks the palette without either sample button. The Team A/B labels identify the assignment. Manual colour sampling remains available for poor contrast or an unusual board. This is colour grouping, not identification of players.
+
+Set **Shots per team** once (default 12, configurable 1–12; WCC singles uses 8). Clear the teaching pucks to start the round. **Finish rounds automatically** counts new shooting-edge pucks with observed inward travel and alternating teams, then finishes only after both allocations are exhausted, the final score has been accepted, and the final clip has closed. A stopped board is not enough; 20s and out-of-play discs do not reduce shots already used. A new round waits for the old board to clear.
+
+Ambiguous/missed launches, unexpected turns, camera interruptions, or mid-round reconnects hold completion. The exceptional **Correct an uncertain shot count** control records a player correction and requires score review. Team colours are not silently changed mid-round. Existing first-contact/foul limits, manual 20 confirmation, camera privacy and pre-roll remain unchanged.
+
+Format source: https://worldcrokinole.com/thegame.html (WCC: singles 8/player; doubles 6/player, 12/team). The app cannot see an off-board pile well enough to infer which allocation you chose.
