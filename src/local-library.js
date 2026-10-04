@@ -1,7 +1,10 @@
 /** Origin-local IndexedDB. A write is 'saved' only after transaction completion.
  * Quota/private-mode failures leave in-tab evidence intact and visible. */
 export class ClipStore {
-  constructor(factory=globalThis.indexedDB){this.factory=factory;this.database=null;this.opening=null;}
+  constructor(factory){
+    try{this.factory=factory===undefined?globalThis.indexedDB:factory;}catch{this.factory=null;}
+    this.database=null;this.opening=null;
+  }
   open(){
     if(this.database)return Promise.resolve(this.database);if(this.opening)return this.opening;
     this.opening=new Promise((resolve,reject)=>{

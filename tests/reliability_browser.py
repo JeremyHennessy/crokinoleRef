@@ -95,7 +95,7 @@ with sync_playwright() as pw:
     expect(page.locator('#clip-count')).to_have_text('1',timeout=10000)
     expect(page.locator('#clips')).to_contain_text('NOT SAVED',timeout=10000)
     page.locator('#clips button',has_text='Review').click()
-    with page.expect_download() as dl:page.locator('#export-video').click()
+    with page.expect_download() as dl:page.locator('#download-clip').click()
     dl.value.save_as(str(OUT/'storage-denial-proof.webm'))
     assert (OUT/'storage-denial-proof.webm').stat().st_size>0
     passed('Denied local storage retains exportable in-tab recording and never labels it saved')

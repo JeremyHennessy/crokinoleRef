@@ -1,26 +1,18 @@
-## New: no colour clicks or routine Finish-round clicks
-
-1. Keep your existing camera/calibration setup. Save the empty-board reference.
-2. Show one separate puck of each colour on the playing surface, away from the centre hole. Keep both still and lift your hands. With **Detect team colours automatically** on, the labels will show the locked assignments. Do not assume Team A is a particular person; use the labels/team names. Manual sample buttons are a fallback.
-3. Choose **Shots per team** once: 12 by default (casual/doubles), 8 for WCC singles, or 1–12 for practice. Remove the two teaching pucks. An unobstructed clear board starts counting.
-4. Play alternating teams. Each observed new puck entering from the shooting edge and travelling inward consumes a shot. The app shows remaining shots. It does not count every collision as a shot, infer a round end from silence, or count surviving pucks as remaining shots.
-5. After the final allocated shot, the app waits for settlement, resolution of any score review, and the last recording to close; then it records the result and advances exactly one round. Clear the board for the next round. No routine Finish-round click is needed.
-
-If a launch is missed/hidden, the turn sequence is inconsistent, or the camera is interrupted, automatic completion pauses. Open **Correct an uncertain shot count**, enter the number of UNPLAYED pucks remaining for A and B, and confirm. Review the board score before continuing. The existing Finish-round button and Undo remain available. The camera cannot prove whether a hand-carried disc was flicked; real-game behaviour still needs validation.
-
-Possible 20s still need player confirmation. Team-colour learning and round progress are experimental; same-colour touching discs, glare, hand occlusion and very fast launches can require the fallback. Buffered clips are not redesigned by this change.
-
----
-
 # First game setup
 
-## Smart setup — start here
+## Automatic setup and normal play
 
-After connecting the webcam, Crokinole Ref automatically tries to find the board. It looks for the large round light playing surface, identifies the dark 20 hole, uses those two features to correct the camera perspective, then searches the straightened image for the three printed scoring circles. If confidence is high enough, it opens a preview automatically. You can also press **Find board automatically** at any time.
+Connect the webcam on a computer browser. Keep the full board visible in a fixed view, including the outer printed circle. An angle around 45° is supported experimentally. Use even lighting, and compare camera-reported, observed and analysed frame rates; requested camera settings are not a guarantee.
 
-**No calibration clicks and no puck are required for this step.** The coloured guides must still be checked before pressing **Use this calibration**. The gold outer guide is the detected playing-surface boundary; the other guides should follow the printed scoring circles. The straightened preview should look circular. Smart setup estimates the initial puck radius from board geometry; later detection provides the practical check.
+**Smart setup** tries to find the playing surface, 20 hole and three scoring circles automatically. Inspect the coloured overlay and straightened preview before pressing **Use this calibration**. The fit indicator is a heuristic, not a measured accuracy probability. If the fit is poor, retry or use the manual guide below.
 
-If the board, 20 hole, or scoring circles cannot be found confidently, nothing is applied. Improve framing/lighting and try again, or open **Manual fallback**. A failed automatic attempt does not damage the previous calibration.
+Clear all pucks and hands, then press **Save empty board**. Show one separate stationary puck of each colour, away from the hole, and remove your hands. With **Detect team colours automatically** enabled, the palette locks after repeated observations. The same observations measure puck radius and its uncertainty. This is an image measurement, not physical millimetre certification. Team A/B names identify the assignment, not the people; check the labels. Manual sampling remains a fallback for poor contrast.
+
+Choose a **Game format**: Casual (12 per team), Singles (8), Doubles (12), or Custom (1–12). Choose the first starting team or let the first observed launch establish it. Later rounds alternate the known starting team. Remove both teaching pucks and wait for the clear-board start. With automatic scoring, clips and round completion enabled, no routine per-shot Record or Finish-round click is needed.
+
+The round counter requires a newly introduced shooting-edge puck with observed inward travel. It does not count every collision, infer completion from silence, or equate surviving pucks with shots remaining. After both allocations are exhausted, settlement, accepted scoring and the final recording must complete before the round advances once. Clear the old board before the next round.
+
+If a launch is missed or hidden, the turn sequence is inconsistent, or the camera is interrupted, automatic completion pauses. **Correct an uncertain shot count** accepts a player-confirmed number of UNPLAYED pucks for each team. Review the board score before continuing. This cannot prove whether a hand-carried disc was flicked; physical-game accuracy remains unverified.
 
 ## Manual fallback: guided calibration
 
@@ -51,58 +43,38 @@ The guide does not change the active calibration while you are clicking. **Undo 
 
 The centre hole is used together with the four quarter marks in a best-fit perspective solution. This is deliberately tolerant of a small amount of manual click error and ordinary webcam lens distortion. Misordered, repeated, off-frame or grossly inconsistent points are still rejected. The displayed residual is a fit diagnostic, not a guarantee of millimetre accuracy; the coloured ring overlay remains the final calibration check.
 
-## Teach the detector your empty board and puck colours
+## Play view and scoring reviews
 
-After applying calibration, remove ALL pucks and hands and press **Save empty board**. Then place one puck from each team. Press **Sample team A**, click that puck's solid centre in the camera image, and repeat for B. Do not sample a highlight or shadow. An updated calibration deliberately clears the old background/colour setup.
+**Play view** puts the camera, scores, remaining shots and current state together. **Review board** returns to the correction controls; **Setup view** restores the original layout. Neither changes game rules or calibration.
 
-Recalibrate and capture a new empty reference after moving the camera or board, or changing lighting. Camera capture mode is a request, not a guarantee: compare reported, observed and analysed frame rates. About 33 ms separates frames at 30 fps, so multiple contacts may happen between them. The app never guarantees first-contact order.
+A settled visible-board score can update automatically only when its evidence checks pass. Frame gaps, unresolved foreground, missing pucks, possible 20s and close scoring lines hold the score. Yellow region/cluster outlines are review prompts, not scored pucks. Predictions and reacquired identities are not substitute image evidence. An unresolved puck-sized region blocks automatic scoring even when the disc was never tracked earlier.
 
-## Automatic tracking, scoring and clips
+The app does not award a confirmed 20 merely because a puck disappears near the centre. Inspect the board/replay, bank the confirmed 20 with **+20** or the editable **Confirmed 20s** count, then use **Use reviewed board score**. No automatic legal/foul or verified first-contact verdict is provided. A contact marker means observed proximity, not proof of impact or contact order.
 
-After the empty-board reference and both team colours are set, puck tracking runs continuously. There is no per-shot tracking button.
+For a detector error, select **Missing disc** or **Correct detected disc**, choose its team/value, and click its position in the camera view. Review the complete board before applying. Missing-disc annotations reconcile with an unambiguous later detection at that location rather than count twice. Board annotations expire when a new shot or calibration makes the observation stale; they never silently follow a moving puck.
 
-With **Auto scoring** enabled, the tracker watches for meaningful puck movement, starts a shot, waits until the board has remained settled, and then calculates the visible board score. Pucks fully inside the 15/10/5 zones are scored from their corrected board positions. A puck close enough to a scoring boundary or centre is marked for review; the suggested lower-zone score can still be displayed, but uncertainty remains visible.
+Confirmed 20s and signed **Round adjustments** are separate ledgers. Enter replacement values to subtract an incorrect entry. Existing +5/+10/+15 buttons remain persistent round adjustments, not missing-disc corrections; do not use them for a disc that may be detected again. Undo restores the preceding score state and pauses automatic scoring for review.
 
-A tracked puck approaching the centre and then disappearing is a **possible 20**, not a confirmed one. The shot is flagged for review and the score is held. Verify the replay/board, use that team's **+20** button for a real 20, and then press **Use reviewed board score**. Confirmed 20s are banked separately from visible pucks and survive later automatic updates. A hidden or lost puck is never automatically converted into a 20.
+Finish-round remains a manual fallback, blocked during an active shot/clip. Automatic completion also waits for score review and the clip. Difference mode awards the round margin; match-point mode awards 2 for a win, 1 each for a tie, and 0 for a loss. Full tournament structure and timing exceptions are not implemented.
 
-With **Auto clips** and **Include pre-shot footage** enabled, the app keeps a small rolling video buffer locally once tracking is ready. Wait for **Pre-shot buffer ready** before the first shot. When motion is detected, a recording that was already running is retained and continues through settlement. Its nominal lead-in is about 2–4 seconds; the actual estimated lead-in is shown on the clip and in Review. Early shots can have a shorter lead-in. When buffering is off or unavailable, automatic clips still start on motion, with zero pre-roll clearly recorded. Manual clips remain available.
+## Clips, pre-roll and local storage
 
-Unused buffer footage is discarded, not uploaded or added to the shot library. Turning off the pre-shot option releases the idle encoders without deleting saved clips. Disconnecting, changing calibration/source, or hiding the tab discards stale idle footage. The buffer uses extra video encoding; turn off **Include pre-shot footage** if your computer cannot sustain capture and analysis. See [buffering details and test boundaries](BUFFERING.md).
+With **Auto clips** and **Include pre-shot footage** enabled, wait for **Pre-shot buffer ready** before shooting. An already-running local recording is retained when motion is detected and continues through settlement. Its nominal lead-in is about 2–4 seconds after warm-up; the estimated lead-in is shown per clip. Early shots may have less. With unavailable/disabled buffering, recording starts on detected motion. Manual clips remain available, including without completed vision setup.
 
-The scoreboard is updated only after settlement with no frame gap, unexplained obstruction, unexplained puck loss, close scoring-line call or pending 20 review. These are evidence gates, not measured accuracy percentages. Manual point buttons remain available as corrections, and Undo restores the previous score state. Finishing a round resets the tracked 20 count and automatic shot count for the next round.
+Unused buffered footage is discarded locally. Changing source/calibration, hiding the tab or disconnecting discards stale idle footage. Extra encoding can affect performance on a physical computer; turn pre-roll off if capture cannot keep up. See [BUFFERING.md](BUFFERING.md).
 
-Automatic scoring is not an automatic foul/legal-shot engine. Contact candidates, hand occlusion, combinations and first-contact order still need separate evidence/review.
+Open **Review** to replay a clip at normal, half or quarter speed and save human notes. The +/-33 ms buttons are approximate seeks, not guaranteed frame stepping. They cannot recover missing footage. Exported videos contain the original encoded pixels, not burned-in overlays.
 
-## Try without a camera
+Completed clips and saved review notes go into this browser's local IndexedDB library. **Saved** appears only after the storage transaction completes. A blocked/private-mode/quota failure retains the in-tab clip with **NOT SAVED**; export it before closing. Reload should recover successfully saved clips without reopening the camera. Deletion removes the local record, with confirmation.
 
-**Try the demo** generates synthetic discs locally. Four reference ticks are included for practicing the guide. Synthetic success is not proof of real-camera accuracy. The demo has its own temporary scoreboard. It does not overwrite your saved live match or create real-camera recordings; Disconnect restores the live score.
+Use **Export match with clips** for one ZIP containing original videos, match metadata and replay configurations. Limits: 120 clips, 64 MB per clip and 256 MB total video bytes. Nothing is silently evicted. Site-data clearing or browser eviction can remove local storage; keep an exported backup. A persistent-storage request is not a backup guarantee.
 
-## Record and review a shot
+## Diagnostics, imported footage and privacy
 
-With **Auto clips** enabled, live-camera clips are retained on detected motion and stop after settlement; enabled, warmed-up buffering also includes the pre-shot lead-in. Manual clip controls remain available, and manual clips stop after 30 seconds. Recording also works without completed vision setup when started manually; untracked video remains useful for human replay.
+**Export diagnostics** downloads recent observations, uncertainty regions, timing/settings and the empty-board reference needed to reproduce analysis. ZIP replay fixtures also include empty-board pixels and can show your room. Review exports before sharing. No footage is uploaded automatically. The local recorded-video harness and optional independent labels are documented in [RELIABILITY.md](RELIABILITY.md). Without labels, a report contains observations, not an accuracy percentage.
 
-Open **Review** in the shot library. Normal, half and quarter speed are available. The +/-33 ms buttons are approximate time seeks, **not guaranteed frame stepping**. They cannot recover missing frames. Candidate contacts are listed separately; the exported video has no overlays burned in.
+**Try the demo** uses synthetic discs and isolated preview scores. Imported local clips can be replayed and explored without uploads; their temporary scores do not overwrite the live match. Disconnect restores the live scoreboard. A real recording with a matching replay fixture is required for physical-camera benchmarking; a still image or synthetic test is not equivalent.
 
-Set your own decision and notes only after review. Automatic legal/foul conclusions remain disabled; visible-board scoring is a separate feature. A candidate means two detected discs came close in sampled frames; it is not proof of impact, causal direction or which contact came first. Missing discs, hands and tracking gaps do not become fouls or 20s. Imported videos can be replayed and explored in the board view, but their experimental live analysis is not persisted to the clip log in v0.1.
+Use the HTTPS site or localhost, not file://. Camera permission applies to the website origin. No microphone, cloud inference, analytics, account or API key is required. GitHub receives normal requests for static files. Other apps on the same origin share the browser storage security boundary. Recalibrate and recapture an empty reference when the board, camera or lighting moves.
 
-Export each video to keep it. Export the match JSON to preserve review notes. **Clips and review notes are lost on reload or tab closure.** A leave-page warning is only best-effort. Limits: 30 clips, 64 MB per clip and 256 MB total. Recording does not silently evict existing clips when full. No footage is uploaded by this app.
-
-## Scorekeeping
-
-With **Auto scoring** enabled, a reliable settled shot replaces the current round score with the detected visible-disc total plus manually confirmed 20s and persistent manual point adjustments. The +20 button banks a player-confirmed 20. The +5/+10/+15 buttons add persistent manual point adjustments, rather than changes that disappear on the next shot. Undo restores the previous score and pauses automatic scoring so the correction is not immediately overwritten. If the evidence gates fail, the existing score is held and the Auto referee status asks for review instead of changing it.
-
-Finish round still remains a deliberate human action. It totals the selected mode: casual difference scoring awards only the margin, while match-point mode awards 2 for a win, 1 each for a tie and 0 for a loss. The mode is locked after a completed round; start a new match to change it.
-
-Scores and round history persist in local browser storage when available. Full tournament structure, timed-round exceptions, tie-breaks and automatic foul/legal-shot rulings are not implemented.
-
-The [World Crokinole Championship rules](https://www.worldcrokinole.com/thegame.html) allow own-disc-first combination shots that meet the opponent-contact requirement. First contact alone is therefore not a complete rules engine. A disc touching a scoring line receives the lower score; close cases need human inspection. Tournament timing exceptions and complete match structures are outside this prototype.
-
-## Browser and privacy notes
-
-Use the published HTTPS website, or localhost for development. Browser camera permission applies to the website origin. Camera mode support, frame delivery and recorder codecs vary by device/browser, so physical-camera verification is still required. Stop/disconnect releases the video track. No microphone, cloud inference, analytics, uploads, accounts or API keys are used. The website's static assets are ordinary GitHub Pages requests; local scores share that origin's storage security boundary with any other apps served on that origin.
-
-Browser behavior references: [camera permission and constraints](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia), [video frame callback limitations](https://developer.mozilla.org/en-US/docs/Web/API/HTMLVideoElement/requestVideoFrameCallback), [MediaRecorder](https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder).
-
-## Review and recovery
-
-A held score stays held across later shots until **Use reviewed board score** is confirmed. This prevents an unresolved missing puck/20 from silently disappearing from the match. Before using it, ensure all pucks are visible and enter confirmed 20s. Finish round is still a deliberate action and is blocked while a shot/clip is active. The next round waits for an empty board, so collecting the previous round's pucks does not score as a new shot. Recalibration or a visibility interruption invalidates in-flight shot analysis; any interrupted automatic clip is labelled incomplete.
+Rules reference: [World Crokinole Championship](https://www.worldcrokinole.com/thegame.html). Own-disc-first combinations can meet the opponent-contact requirement, so first contact alone is not a complete rule engine. A puck touching a scoring line gets the lower value; uncertain line calls require inspection. Browser references: [camera constraints](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia), [frame callbacks](https://developer.mozilla.org/en-US/docs/Web/API/HTMLVideoElement/requestVideoFrameCallback), [MediaRecorder](https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder).

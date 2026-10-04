@@ -73,7 +73,7 @@ export function installGameAutomation({state, getCalibration, readyToTrack, reco
   };
   return {
     snapshot,restore,renderPalette,
-    onReconfigure(){if(state.mode==='idle'&&!counter.used.some(Boolean))counter.reset(readLimit());else counter.interrupt();renderCounter();},
+    onReconfigure(){if(state.mode==='idle'&&!counter.used.some(Boolean))counter.reset(readLimit(),counter.starter??readStarter());else counter.interrupt();renderCounter();},
     resetRound(){const starter=state.round===1?readStarter():counter.starter!==null?1-counter.starter:null;counter.reset(readLimit(),starter);lastCompleted='';renderCounter();},
     enterPreview(){preview=snapshot();counter=new RoundTracker(readLimit());renderCounter();},
     exitPreview(){if(preview){const saved=preview;preview=null;counter=new RoundTracker(saved.shotsPerTeam);counter.restore(saved);}renderCounter();},
