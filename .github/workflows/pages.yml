@@ -37,6 +37,7 @@ jobs:
           python tests/teams_rounds_browser.py
           python tests/reliability_browser.py
           python tests/offline_replay_proof.py
+          python tests/full_round_demo_browser.py
       - name: Preserve browser evidence (synthetic only)
         if: always()
         uses: actions/upload-artifact@v4

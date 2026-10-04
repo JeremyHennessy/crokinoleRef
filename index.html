@@ -27,10 +27,28 @@
         <div class="panel-heading"><div><p class="eyebrow">CAMERA VIEW</p><h2 id="board-heading">The board</h2></div><span id="source-badge" class="badge">No camera connected</span></div>
         <div class="stage" id="stage">
           <canvas id="board" width="960" height="720" aria-label="Board camera view. Smart setup can find the board automatically; manual calibration remains available." tabindex="0"></canvas>
-          <div id="welcome" class="welcome"><div class="lens-symbol" aria-hidden="true">◎</div><h3>Pull up a seat.</h3><p>Connect your webcam,<br>or explore with a simulated board.</p><button id="demo" class="light">Try the demo →</button><span>No camera or sign-in needed for the demo.</span></div>
+          <div id="welcome" class="welcome"><div class="lens-symbol" aria-hidden="true">◎</div><h3>Pull up a seat.</h3><p>Connect your webcam,<br>or explore with a simulated board.</p><button id="demo-round" class="light">Watch a full round →</button><button id="demo" class="light">Try the quick demo →</button><span>No camera or sign-in needed for the demo.</span></div>
           <span id="demo-label" class="stage-label" hidden>SYNTHETIC DEMO · NOT CAMERA EVIDENCE</span>
           <span id="record-label" class="record-label" hidden>● RECORDING</span>
         </div>
+        <section id="full-round-controls" class="full-round-controls" aria-label="Full-round simulation" hidden>
+          <p class="eyebrow">SCRIPTED EXHIBITION · 8 SHOTS EACH</p>
+          <h3 id="demo-round-status" role="status" aria-live="polite">Full-round demo</h3>
+          <p id="demo-shot-caption"></p>
+          <progress id="demo-progress" max="16" value="0" aria-label="Completed demo shots"></progress>
+          <p id="demo-ledger" class="help"></p>
+          <div class="demo-actions">
+            <button id="demo-pause" class="primary">Pause</button>
+            <button id="demo-next-shot" class="secondary">Skip to next shot</button>
+            <button id="demo-restart" class="secondary">Replay round</button>
+            <label for="demo-speed">Speed <select id="demo-speed"><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
+            <button id="demo-next-round" class="primary" hidden>Next demo round</button>
+            <button id="demo-exit" class="text-button">Exit demo</button>
+          </div>
+          <p id="demo-result" class="demo-result" hidden></p>
+          <details><summary>Shot-by-shot demo log</summary><ol id="demo-shot-log"></ol></details>
+          <p class="help">Animated, scripted outcomes—not a physics simulation or camera-accuracy test. Banked 20s are supplied by the script; live 20s still need confirmation. Your real match and saved clips are unchanged.</p>
+        </section>
         <div class="stage-footer"><p id="stage-hint">Use a stable angled or overhead view with the entire scoring circle visible.</p><label class="inline"><input id="overlays" type="checkbox" checked> Guides</label></div>
         <div id="file-controls" class="file-controls" hidden><button id="file-play" class="secondary">Play / pause</button><input id="file-seek" type="range" min="0" max="1000" value="0" aria-label="Imported video position"><span id="file-time">0:00</span></div>
         <div class="metrics" aria-label="Capture diagnostics"><div><span>Camera reports</span><strong id="reported-fps">—</strong></div><div><span>Observed / analysed fps</span><strong id="observed-fps">—</strong></div><div><span>Largest recent gap</span><strong id="frame-gap">—</strong></div><div><span>Candidate discs</span><strong id="disc-count">—</strong></div></div>
