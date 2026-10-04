@@ -414,7 +414,9 @@ function paintPhysicsDemo(discs, contacts=[]) {
     circle(d.x,d.y,radius,`rgb(${state.colors[d.team]})`);
     rawCtx.restore();
   }
-  $('disc-count').textContent=String(discs.filter(d=>!d.out&&!d.pocketed).length);
+  const scale=small.width/board.width;
+  state.discs=discs.filter(d=>!d.out&&!d.pocketed).map(d=>({...d,x:d.x*scale,y:d.y*scale,r:d.r*scale}));
+  $('disc-count').textContent=String(state.discs.length);
   $('contact-status').textContent=contacts.length?'Simulated contact: '+contacts.map(e=>e.type==='peg'?'peg deflection':'disc-to-disc impact').join(' · '):'Demo physics only · live contact/referee decisions are unchanged.';
 }
 function startDemo(fullRound = false) {
@@ -649,5 +651,5 @@ window.addEventListener('beforeunload', e => { if (library?.hasUnsaved() || stat
 window.addEventListener('pagehide', () => { clipBuffer.stop(); state.stream?.getTracks().forEach(t => t.stop()); });
 game=installGameAutomation({state,getCalibration:analysisCalibration,readyToTrack,reconfigure:configureWorker,updateControls,saveMatch,finishRound,notify});
 reviewControls=installReviewControls({state,board,getCalibration:analysisCalibration,toAnalysis:p=>state.projection?projectPoint(state.projection.imageToBoard,p):{x:p.x*small.width/board.width,y:p.y*small.width/board.width},snapshotScore,saveMatch,renderScore,notify});
-fullDemo=new FullRoundDemo({state,processFrame:time=>{state.time=time;ctx.drawImage(raw,0,0);},renderScore,exit:stopSource,paint:paintPhysicsDemo});
+fullDemo=new FullRoundDemo({state,processFrame:time=>{state.time=time;ctx.drawImage(raw,0,0);drawOverlay();},renderScore,exit:stopSource,paint:paintPhysicsDemo});
 loadMatch();renderScore();library=installLibraryControls({state,renderClips,updateControls,payload:sessionPayload,download,notify});updateControls();listCameras();

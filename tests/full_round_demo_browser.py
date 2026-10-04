@@ -43,6 +43,14 @@ with sync_playwright() as pw:
     assert page.locator('#demo-shot-log li').count()==16
     page.screenshot(path=str(OUT/'full-demo-finished.png'),full_page=True)
     passed('Unassisted autoplay at 2× completes all 16 shots, scores 25–70 and awards the 45-point margin once')
+    guided=page.locator('#board').evaluate('(canvas)=>canvas.toDataURL()')
+    page.locator('#overlays').uncheck();page.wait_for_timeout(100)
+    plain=page.locator('#board').evaluate('(canvas)=>canvas.toDataURL()')
+    assert guided!=plain,'Guides must change rendered pixels, including while the completed round is held'
+    page.locator('#overlays').check();page.wait_for_timeout(100)
+    assert page.locator('#board').evaluate('(canvas)=>canvas.toDataURL()')==guided
+    expect(panel).to_have_attribute('data-score','25,70')
+    passed('Existing Guides switch removes and restores the overlay without changing the simulated result')
     assert page.evaluate("localStorage.getItem('crokinole-ref-match-v1')")==original
     assert database(page)==stored
     passed('Autoplay writes neither the saved live match nor existing clip bytes, notes or match snapshots')
