@@ -36,10 +36,11 @@ with sync_playwright() as pw:
         panel=page.locator('#full-round-controls');expect(panel).to_be_visible()
         page.locator('#demo-speed').select_option('2')
         expect(panel).to_have_attribute('data-completed','16',timeout=65000)
-        expect(panel).to_have_attribute('data-score','25,70')
+        expect(panel).to_have_attribute('data-score','70,90')
         expect(panel).to_have_attribute('data-phase','complete')
         expect(panel).to_have_attribute('data-engine','swept-circle-v1')
-        report['completed']=16;report['score']=[25,70]
+        expect(page.locator('#demo-shot-log')).to_contain_text('Stopped outer-line disc removed before the next shot')
+        report['completed']=16;report['score']=[70,90];report['settlementRulesVerified']=True
         page.screenshot(path=str(OUT/'live-full-demo-complete.png'),full_page=True)
         page.locator('#demo-exit').click();expect(page.locator('#welcome')).to_be_visible()
         report['exitVerified']=True
@@ -49,4 +50,4 @@ with sync_playwright() as pw:
     finally:
         (OUT/'live-demo-report.json').write_text(json.dumps(report,indent=2))
         browser.close()
-print('Live full-demo button verified:',args.commit,'16 shots, 25–70, Exit works',flush=True)
+print('Live full-demo button verified:',args.commit,'16 shots, 70–90, Exit works',flush=True)

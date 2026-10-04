@@ -72,7 +72,7 @@ export class FullRoundDemo {
     if(!this.active||!this.frame)return;
     const f=this.frame,$=this.$,ended=f.phase==='complete';
     const who=f.scores[0]===f.scores[1]?'Tie':`${f.scores[0]>f.scores[1]?'Blue / A':'Red / B'} wins by ${Math.abs(f.scores[0]-f.scores[1])}`;
-    const heading=ended?`Round ${f.round} finished · ${who} · ${f.scores.join('–')}`:`${this.paused?'Paused · ':''}Shot ${f.completed+1} of 16 · ${f.team===0?'Blue / A':'Red / B'} · ${f.phase==='shooting'?'in motion':f.phase==='settling'?'settling':'lining up'}`;
+    const heading=ended?`Round ${f.round} finished · ${who} · ${f.scores.join('–')}`:`${this.paused?'Paused · ':''}Shot ${f.completed+1} of 16 · ${f.team===0?'Blue / A':'Red / B'} · ${f.phase==='shooting'?'in motion':f.phase==='settling'?'settling':f.phase==='clearing'?'removing out-of-play discs':'lining up'}`;
     if($('demo-round-status').textContent!==heading)$('demo-round-status').textContent=heading;
     const panel=$('full-round-controls');panel.dataset.engine='swept-circle-v1';panel.dataset.completed=String(f.completed);panel.dataset.phase=f.phase;panel.dataset.round=String(f.round);panel.dataset.score=f.scores.join(',');panel.dataset.paused=String(this.paused);
     $('demo-progress').value=f.completed;

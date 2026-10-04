@@ -29,6 +29,7 @@
   fixture.clearRound=()=>{fixture.roundPucks=[];fixture.roundMove=null;fixture.mode='round-play';};
   fixture.flickRoundPuck=()=>{fixture.roundMove={index:fixture.roundPucks.length-1,start:performance.now(),from:{...fixture.roundPucks.at(-1)}};};
   const draw=()=>{
+    window.captureProbe?.sourceDraw(performance.now());
     ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='#223e35';ctx.fillRect(0,0,960,720);
     if(fixture.angled)ctx.setTransform(1,.08,.10,.72,-30,75);
     circle(480,360,280,'#dfc594');
