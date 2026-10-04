@@ -48,9 +48,16 @@ export function averageColor(data, width, height, x, y, radius = 2) {
 export function detectDiscs(data, background, width, height, calibration, colors, tolerance = 70) {
   return detectDiscEvidence(data,background,width,height,calibration,colors,tolerance).discs;
 }
-export function detectDiscEvidence(data, background, width, height, calibration, colors, tolerance = 70) {
+/** Per-worker scratch space. It contains no retained detections or score state. */
+export function createDetectionWorkspace(width,height) {
+  if(!Number.isSafeInteger(width)||!Number.isSafeInteger(height)||width<=0||height<=0||width*height>16777216)throw Error('Invalid detection workspace size.');
+  return {width,height,mask:new Uint8Array(width*height),stack:new Int32Array(width*height)};
+}
+export function detectDiscEvidence(data, background, width, height, calibration, colors, tolerance = 70, workspace = null) {
   if (!calibration || !background || background.length !== data.length || !colors?.every(Boolean)) return {discs:[],unresolved:[],clusterCandidates:[]};
-  const n = width * height, mask = new Uint8Array(n), stack = new Int32Array(n);
+  if(workspace&&(workspace.width!==width||workspace.height!==height))throw Error('Detection workspace does not match this frame.');
+  const n = width * height, buffers=workspace||createDetectionWorkspace(width,height), {mask,stack}=buffers;
+  mask.fill(0);
   const [cx, cy] = [calibration.center.x, calibration.center.y], boardR = calibration.rings[2];
   const colorLimit = tolerance * tolerance, bgLimit = 28 * 28;
   for (let y = Math.max(0, Math.floor(cy - boardR)); y < Math.min(height, cy + boardR); y++) {
@@ -59,8 +66,10 @@ export function detectDiscEvidence(data, background, width, height, calibration,
       const p = y * width + x, i = p * 4;
       let bg = 0; for (let k = 0; k < 3; k++) bg += (data[i + k] - background[i + k]) ** 2;
       if (bg < bgLimit) continue;
-      const ds = colors.map(c => c.reduce((s, v, k) => s + (data[i + k] - v) ** 2, 0));
-      if (Math.min(...ds) < colorLimit && Math.abs(ds[0] - ds[1]) > 225) mask[p] = ds[0] < ds[1] ? 1 : 2;
+      // Same RGB squared distances, without allocating arrays/closures per pixel.
+      const a=(data[i]-colors[0][0])**2+(data[i+1]-colors[0][1])**2+(data[i+2]-colors[0][2])**2;
+      const b=(data[i]-colors[1][0])**2+(data[i+1]-colors[1][1])**2+(data[i+2]-colors[1][2])**2;
+      if (Math.min(a,b) < colorLimit && Math.abs(a-b) > 225) mask[p] = a < b ? 1 : 2;
     }
   }
   const result = [], unresolved=[], clusterCandidates=[], expected = Math.PI * calibration.discRadius ** 2;
@@ -72,8 +81,11 @@ export function detectDiscEvidence(data, background, width, height, calibration,
     while (top) {
       const p = stack[--top], x = p % width, y = Math.floor(p / width);
       members.push(p); count++; sx += x; sy += y; minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-      const neighbors = [x > 0 ? p - 1 : -1, x < width - 1 ? p + 1 : -1, y > 0 ? p - width : -1, y < height - 1 ? p + width : -1];
-      for (const q of neighbors) if (q >= 0 && mask[q] === team) { mask[q] = 0; stack[top++] = q; }
+      // Preserve the original traversal order (left, right, up, down).
+      if(x>0&&mask[p-1]===team){mask[p-1]=0;stack[top++]=p-1;}
+      if(x<width-1&&mask[p+1]===team){mask[p+1]=0;stack[top++]=p+1;}
+      if(y>0&&mask[p-width]===team){mask[p-width]=0;stack[top++]=p-width;}
+      if(y<height-1&&mask[p+width]===team){mask[p+width]=0;stack[top++]=p+width;}
     }
     const bw = maxX - minX + 1, bh = maxY - minY + 1;
     if (count >= expected * 0.3 && count <= expected * 1.65 && bw / bh > 0.6 && bw / bh < 1.65 && count / (bw * bh) > 0.45) {

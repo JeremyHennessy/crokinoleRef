@@ -1,11 +1,17 @@
 /** Image-change evidence, not a semantic hand detector. Unknown foreground is
  * retained even if it was NEVER previously tracked. A small puck cluster must
  * not disappear into a large whole-board percentage threshold. */
-export function assessVisibility(pixels, background, width, height, calibration, discs) {
+export function createVisibilityWorkspace(width,height){
+  if(!Number.isSafeInteger(width)||!Number.isSafeInteger(height)||width<=0||height<=0||width*height>16777216)throw Error('Invalid visibility workspace size.');
+  const size=Math.ceil(width/2)*Math.ceil(height/2);
+  return {width,height,residual:new Uint8Array(size),stack:new Int32Array(size)};
+}
+export function assessVisibility(pixels, background, width, height, calibration, discs, workspace=null) {
   if (!background || !calibration || pixels.length !== width * height * 4 || background.length !== pixels.length) return { viewObstructed: true, unexplainedPixels: null, unresolvedRegions: [] };
   const {center, rings, discRadius} = calibration;
   const step=2, cols=Math.ceil(width/step), rows=Math.ceil(height/step);
-  const residual=new Uint8Array(cols*rows),stack=new Int32Array(residual.length);
+  if(workspace&&(workspace.width!==width||workspace.height!==height))throw Error('Visibility workspace does not match this frame.');
+  const {residual,stack}=workspace||createVisibilityWorkspace(width,height);residual.fill(0);
   let changed=0,unexplained=0,sampled=0;
   for(let gy=0;gy<rows;gy++) for(let gx=0;gx<cols;gx++) {
     const x=gx*step,y=gy*step;

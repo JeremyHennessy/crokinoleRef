@@ -6,7 +6,7 @@ export class DiagnosticLog{
  constructor(limit=1800){this.limit=limit;this.reset();}
  reset(){this.frames=[];this.events=[];this.dropped=0;}
  push(m){
-  const frame={time:m.time,generation:m.generation,discs:m.discs?.map(({id,team,x,y,r,trackingState})=>({id,team,x,y,r,trackingState})),frameGap:m.frameGap,visibility:m.visibility,detectionEvidence:m.detectionEvidence,state:m.auto?.state};
+  const frame={time:m.time,generation:m.generation,discs:m.discs?.map(({id,team,x,y,r,trackingState})=>({id,team,x,y,r,trackingState})),frameGap:m.frameGap,processing:m.processing,visibility:m.visibility,detectionEvidence:m.detectionEvidence,state:m.auto?.state};
   this.frames.push(frame);if(this.frames.length>this.limit){this.frames.shift();this.dropped++;}
   if(m.auto?.event){this.events.push(structuredClone(m.auto.event));this.events=this.events.slice(-200);}
  }

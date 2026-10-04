@@ -7,7 +7,7 @@ import { RollingClipBuffer, createCapture } from './clip-buffer.js';
 import { installGameAutomation } from './game-automation.js';
 import { installReviewControls } from './review-controls.js';
 import { invalidateBoardCorrections, validBoardCorrections } from './board-corrections.js';
-import { DiagnosticLog, diagnosticJSON } from './diagnostics.js';
+import { DiagnosticLog, diagnosticJSON } from './diagnostics.js?workspace=1';
 import { installLibraryControls } from './library-controls.js';
 import { FullRoundDemo } from './full-round-demo.js?physics=1';
 import { DEMO_BOARD } from './demo-physics.js?physics=1';
@@ -55,7 +55,7 @@ const guide = new CalibrationGuide({
 });
 let worker;
 try {
-  worker = new Worker(new URL('./vision-worker.js?reliability=1', import.meta.url), { type: 'module' });
+  worker = new Worker(new URL('./vision-worker.js?workspace=1', import.meta.url), { type: 'module' });
   worker.onmessage = ({ data: m }) => {
     if (m.generation !== state.generation) return;
     state.inflight = false;
