@@ -1,0 +1,77 @@
+name: Read-only published full-demo check
+on:
+  push:
+    branches: [diagnostic/public-full-demo-check]
+permissions:
+  contents: read
+jobs:
+  public-demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install independent test browsers
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium webkit
+      - name: Check actual public site with fresh profiles without changing its files
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json,hashlib
+          from urllib.parse import urljoin,urlsplit
+          from playwright.sync_api import sync_playwright,expect
+          base='https://jeremyhennessy.github.io/crokinoleRef/'
+          expected='4bb47e4d459ce310f1609382a36c1fb98edcb5ef'
+          expected_script='1d823cf48ea08335a3701c717d633b733e42fa066e309a4139b59d6a0086bbb0'
+          out=Path('test-results');out.mkdir(exist_ok=True)
+          results=[]
+          try:
+              with sync_playwright() as pw:
+                  for engine in ['chromium','webkit']:
+                      browser=getattr(pw,engine).launch(headless=True)
+                      page=browser.new_page(viewport={'width':390,'height':844})
+                      errors=[];responses=[]
+                      page.on('pageerror',lambda e:errors.append(str(e)))
+                      page.on('response',lambda r:responses.append(r))
+                      result={'engine':engine,'freshProfile':True,'expectedPublishedCommit':expected,'errors':errors,'passed':False}
+                      results.append(result)
+                      try:
+                          build=page.request.get(base+'build-info.json?diagnose='+expected)
+                          assert build.ok,build.status
+                          result['publishedBuild']=build.json()
+                          assert result['publishedBuild']['commit']==expected,result
+                          page.goto(base+'?fresh-demo-check='+engine,wait_until='networkidle')
+                          expect(page.locator('footer')).to_contain_text(expected[:7])
+                          entry=page.locator('script[type=module]').get_attribute('src')
+                          entry_response=[r for r in responses if r.url==urljoin(base,entry)]
+                          assert len(entry_response)==1
+                          result['entry']=entry;result['actualScriptHash']=hashlib.sha256(entry_response[0].body()).hexdigest()
+                          assert result['actualScriptHash']==expected_script
+                          page.locator('#demo-round').click()
+                          panel=page.locator('#full-round-controls');expect(panel).to_be_visible()
+                          page.locator('#demo-speed').select_option('2')
+                          expect(panel).to_have_attribute('data-completed','16',timeout=65000)
+                          expect(panel).to_have_attribute('data-score','70,55');expect(panel).to_have_attribute('data-phase','complete')
+                          result['shots']=16;result['score']=[70,55]
+                          page.screenshot(path=str(out/f'public-fresh-demo-{engine}.png'),full_page=True)
+                          page.locator('#demo-exit').click();expect(page.locator('#welcome')).to_be_visible()
+                          assert not errors,errors
+                          assert not [r.url for r in responses if r.status>=400]
+                          result['exitVerified']=True;result['passed']=True
+                          print('PASS actual published demo',engine,'fresh profile16 shots70–55,Exit',flush=True)
+                      finally:browser.close()
+          finally:
+              (out/'public-fresh-demo-report.json').write_text(json.dumps({'readOnly':True,'results':results},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: public-fresh-demo-evidence
+          path: |
+            test-results/public-fresh-demo-report.json
+            test-results/public-fresh-demo-*.png
+          retention-days: 7
