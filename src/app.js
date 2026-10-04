@@ -263,6 +263,8 @@ function scheduleVideo(token) {
   }
 }
 function processFrame(time, now) {
+  // A repeated presentation is not another observation. Keep real gaps and seeks unchanged.
+  if (state.lastTime !== null && time === state.lastTime) return;
   if (state.lastTime !== null && time < state.lastTime) { resetStats(); configureWorker(); }
   if (state.lastTime !== null && time > state.lastTime) { state.gaps.push(time - state.lastTime); state.gaps = state.gaps.slice(-120); }
   state.lastTime = state.time = time; state.observed++;
