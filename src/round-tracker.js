@@ -40,6 +40,7 @@ export class RoundTracker {
     if(Math.abs(used[0]-used[1])>1)throw Error('Alternating teams cannot differ by more than one completed shot.');
     this.used=used;this.nextTeam=used[0]===used[1]?null:used[0]>used[1]?1:0;
     this.ready=true;this.hold='';this.baseline=discs.map(clone);this.candidate=null;
+    this.lastTime=null;this.lastEvent=null; // A verified correction starts a fresh camera/count continuity interval.
     this.records.push({source:'player-count-correction',used:[...used]});
     return this.status();
   }
