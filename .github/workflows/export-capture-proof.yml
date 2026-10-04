@@ -1,0 +1,69 @@
+name: Verify nonblocking match export and capture
+on:
+  push:
+    branches: [work/export-capture-proof]
+    paths: [.github/workflows/export-capture-proof.yml, .review/export-edits.json]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify and apply the isolated export change
+        run: |
+          python - <<'PY'
+          import hashlib,json,subprocess
+          from pathlib import Path
+          edits=json.loads(Path('.review/export-edits.json').read_text())
+          assert {e['path'] for e in edits}=={'src/app.js','package.json','tests/capture_timing_probe.js'}
+          for e in edits:
+              p=Path(e['path']);old=p.read_text();assert hashlib.sha256(old.encode()).hexdigest()==e['before'],str(p)
+              new=old
+              for a,b,text in reversed(e['ops']):
+                  assert 0<=a<=b<=len(old)
+                  new=new[:a]+text+new[b:]
+              assert hashlib.sha256(new.encode()).hexdigest()==e['after'],str(p)
+              p.write_text(new)
+          subprocess.run(['git','add','--',*[e['path'] for e in edits]],check=True)
+          PY
+          git diff --cached --check
+          cp .git/index /tmp/clean-index
+          GIT_INDEX_FILE=/tmp/clean-index git rm --cached .review/export-edits.json .github/workflows/export-capture-proof.yml
+          test "$(GIT_INDEX_FILE=/tmp/clean-index git write-tree)" = 493e48270264a4f030656158759151c31f382353
+          npm run check && npm test
+      - name: Install browser
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Prove real worker output and unchanged automatic round acceptance
+        run: |
+          python tests/json_export_browser.py
+          python tests/teams_rounds_browser.py
+      - name: Commit passing candidate to the isolated work branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Move pixel-bearing JSON export off the capture event loop' -m 'Platform timing measured JSON.stringify95–212ms as clips accumulated. Dedicated single-request worker preserves schema and live buffers; no synchronous fallback or weakened frame-gap gate. Node188 plus export/browser short-round acceptance passed. Full PR/main gates remain required.'
+          git push origin HEAD:refs/heads/work/export-capture-proof
+      - name: Preserve exact candidate source
+        if: always()
+        run: git archive --format=tar $(git write-tree) > /tmp/export-capture-candidate.tar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: export-capture-evidence
+          path: |
+            /tmp/export-capture-candidate.tar
+            test-results/json-export-report.json
+            test-results/capture-*.json
+            test-results/round-*.json
+            test-results/teams-rounds-report.json
+          retention-days: 3
