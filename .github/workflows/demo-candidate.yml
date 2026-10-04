@@ -1,0 +1,66 @@
+name: Verify isolated full-round demo candidate
+on:
+  push:
+    branches: [feature/full-round-demo]
+    paths: [.github/workflows/demo-candidate.yml, .review/demo-edits.json]
+permissions:
+  contents: write
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply checksum-guarded source changes and verify exact tree
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json,hashlib
+          edits=json.loads(Path('.review/demo-edits.json').read_text())
+          allowed={'.github/workflows/pages.yml','docs/QUICKSTART.md','index.html','package.json','src/app.js','styles.css'}
+          assert {e['path'] for e in edits}==allowed and len(edits)==len(allowed)
+          for e in edits:
+              p=Path(e['path']);old=p.read_text()
+              assert hashlib.sha256(old.encode()).hexdigest()==e['before'],f'Unexpected baseline: {p}'
+              new=old
+              for start,end,text in reversed(e['ops']):
+                  assert 0<=start<=end<=len(old)
+                  new=new[:start]+text+new[end:]
+              assert hashlib.sha256(new.encode()).hexdigest()==e['after'],f'Unexpected candidate: {p}'
+              p.write_text(new)
+          PY
+          git rm .review/demo-edits.json .github/workflows/demo-source.yml .github/workflows/demo-candidate.yml
+          git add src/app.js src/demo-round.js src/full-round-demo.js index.html styles.css package.json docs/QUICKSTART.md tests/demo-round.test.mjs tests/full_round_demo_browser.py .github/workflows/pages.yml
+          git diff --cached --check
+          test "$(git write-tree)" = a7d4651ca578cd62c0d9bfd2f359281f4c672f29
+          npm run check && npm test
+      - name: Install isolated browser test tooling
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Exercise full demo and saved live-data preservation
+        run: python tests/full_round_demo_browser.py
+      - name: Commit only the verified isolated candidate
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Add a complete scripted 16-shot demo without changing live scoring' -m 'Full round with pause, speed, skip, replay, next round and isolated preview scores. Outcomes and 20s are explicitly scripted, not camera verdicts. Exact verified tree a7d4651ca578cd62c0d9bfd2f359281f4c672f29. Temporary source transport removed; full release regression suite remains required before merge.'
+          git push origin HEAD:refs/heads/feature/full-round-demo
+      - name: Preserve candidate source
+        if: always()
+        run: git archive --format=tar $(git write-tree) > /tmp/full-demo-candidate.tar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-demo-candidate-evidence
+          path: |
+            /tmp/full-demo-candidate.tar
+            test-results/full-demo*.png
+            test-results/full-round-demo-report.json
+          retention-days: 3
