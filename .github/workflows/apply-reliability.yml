@@ -1,0 +1,67 @@
+name: Apply reviewed reliability source
+on:
+  push:
+    branches: [feature/reliability-play-library]
+    paths: [.github/workflows/apply-reliability.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check exact source and apply reviewed edits
+        run: |
+          python - <<'PY'
+          import base64,gzip,hashlib,json,subprocess
+          from pathlib import Path
+          encoded=''.join(Path(f'.review/edits.{i}').read_text().strip() for i in range(9))
+          data=gzip.decompress(base64.b64decode(encoded,validate=True))
+          assert hashlib.sha256(data).hexdigest()=='af57d4495d4fea1867c824c9ca5e46e46b06f23fdc58fd64a03dd72b6ab47a94','Source checksum mismatch'
+          edits=json.loads(data)
+          for e in edits:
+              p=Path(e['path'])
+              assert not p.is_absolute() and '..' not in p.parts and p.parts[0] not in ('.github','.review')
+              old=p.read_text() if p.exists() else ''
+              assert hashlib.sha256(old.encode()).hexdigest()==e['before'],f'Unexpected baseline: {p}'
+              new=old
+              for start,end,text in reversed(e['ops']):
+                  assert 0<=start<=end<=len(old)
+                  new=new[:start]+text+new[end:]
+              assert hashlib.sha256(new.encode()).hexdigest()==e['after'],f'Unexpected edited content: {p}'
+              p.parent.mkdir(parents=True,exist_ok=True);p.write_text(new)
+          subprocess.run(['git','add','--',*[e['path'] for e in edits]],check=True)
+          print('Verified and staged',len(edits),'files')
+          PY
+          git diff --cached --check
+          cp .git/index /tmp/clean-reliability-index
+          GIT_INDEX_FILE=/tmp/clean-reliability-index git rm -r --cached .review .github/workflows/reliability-source.yml .github/workflows/apply-reliability.yml
+          CLEAN_TREE=$(GIT_INDEX_FILE=/tmp/clean-reliability-index git write-tree)
+          echo "Clean reviewed tree: $CLEAN_TREE"
+          test "$CLEAN_TREE" = '81b56b89b3eadbf3fd08e3ef8f0608b3de663f8b'
+          npm run check
+          npm test
+      - name: Commit without overwriting concurrent changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Apply reviewed reliability, corrections, Play view and local library' -m 'Exact clean source tree 81b56b89b3eadbf3fd08e3ef8f0608b3de663f8b. 150 local Node tests; full browser acceptance remains a required release gate. No physical-camera accuracy claim; no automatic 20 or legal/foul adjudication. Temporary transport remains branch-only until connector cleanup.'
+          git push origin HEAD:refs/heads/feature/reliability-play-library
+          echo "Feature head: $(git rev-parse HEAD)"
+      - name: Preserve transport diagnostics and source for verification
+        if: always()
+        run: |
+          tar -czf /tmp/reliability-transport.tgz .review
+          git archive --format=tar $(git write-tree) > /tmp/reliability-applied.tar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reliability-apply-proof
+          path: |
+            /tmp/reliability-transport.tgz
+            /tmp/reliability-applied.tar
+          retention-days: 1
