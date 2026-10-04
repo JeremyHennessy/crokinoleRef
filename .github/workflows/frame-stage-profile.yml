@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Test avoiding the redundant full-resolution video readback
+      - name: Test native picture with the same aligned guide canvas and actual small readback
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -25,25 +25,31 @@ jobs:
           p=Path('src/app.js');s=p.read_text()
           assert hashlib.sha256(s.encode()).hexdigest()=='d58cf55c6513acc0aa90582a65b0eab25a9c3b769e599567888e77c536585f89'
           changes=[
-          ("  if (state.mode !== 'demo') rawCtx.drawImage(video, 0, 0, raw.width, raw.height);\n  ctx.drawImage(raw, 0, 0); drawOverlay();","  const source = state.mode === 'demo' ? raw : video;\n  ctx.drawImage(source, 0, 0, raw.width, raw.height); drawOverlay();"),
+          ("const small = document.createElement('canvas')","// Native video supplies the live picture; this canvas remains the aligned guides.\nboard.before(video);Object.assign(video.style,{position:'absolute',inset:'0',width:'100%',height:'100%',objectFit:'contain',pointerEvents:'none'});board.style.position='relative';\nconst small = document.createElement('canvas')"),
+          ("  if (state.mode !== 'demo') rawCtx.drawImage(video, 0, 0, raw.width, raw.height);\n  ctx.drawImage(raw, 0, 0); drawOverlay();","  const source = state.mode === 'demo' ? raw : video;\n  if (state.mode !== 'demo') {video.hidden=false;ctx.clearRect(0,0,raw.width,raw.height);}\n  else ctx.drawImage(raw, 0, 0);\n  drawOverlay();"),
           ('    smallCtx.drawImage(raw, 0, 0, small.width, small.height);','    smallCtx.drawImage(source, 0, 0, small.width, small.height);'),
           ('  smallCtx.drawImage(raw, 0, 0, small.width, small.height); state.background =',"  smallCtx.drawImage(state.mode === 'demo' ? raw : video, 0, 0, small.width, small.height); state.background ="),
-          ('function sampleTeam(team) {\n',"function sampleTeam(team) {\n  if (['camera', 'file'].includes(state.mode) && video.readyState >= 2) rawCtx.drawImage(video, 0, 0, raw.width, raw.height);\n")]
+          ('function sampleTeam(team) {\n',"function sampleTeam(team) {\n  if (['camera', 'file'].includes(state.mode) && video.readyState >= 2) rawCtx.drawImage(video, 0, 0, raw.width, raw.height);\n"),
+          ('  video.pause(); video.srcObject = null;','  video.hidden=true;video.pause(); video.srcObject = null;')]
           for old,new in changes:
               assert s.count(old)==1,old
               s=s.replace(old,new)
-          assert hashlib.sha256(s.encode()).hexdigest()=='d9b755b488cf6f83fdce5fb16316ad8c9ac6ac165b4d3c79d0936116f55555a8'
+          assert hashlib.sha256(s.encode()).hexdigest()=='db6815f23c4b99458e79876e9566cfffa01894be3501b5cc203992396be1fb54'
+          p.write_text(s)
+          p=Path('tests/capture-time.test.mjs');s=p.read_text();assert hashlib.sha256(s.encode()).hexdigest()=='680216f53f46fb7c87f293572d69cec640a30c0aaea235859974c4905f7f1e15'
+          s=s.replace('ctx:{drawImage(){}}','ctx:{drawImage(){},clearRect(){}}',1)
+          assert hashlib.sha256(s.encode()).hexdigest()=='2ada4c3ac92c09c6c879821721bcec78a685b638fa3394a221eed4ffd9c5ae6d'
           p.write_text(s)
           PY
           npm run check && npm test
       - run: |
           python -m pip install playwright==1.57.0
           python -m playwright install --with-deps chromium
-      - name: Measure the single-path change on a full real-browser camera round
+      - name: Measure native-rendered full camera round without forced review acceptance
         run: python tests/frame_stage_profile.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: direct-capture-profile
+          name: native-picture-profile
           path: test-results/frame-stage-profile.json
           retention-days: 3
