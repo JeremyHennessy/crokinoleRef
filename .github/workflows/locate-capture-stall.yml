@@ -1,0 +1,30 @@
+name: Locate capture stall without changing runtime
+on:
+  push:
+    branches: [work/locate-capture-stall]
+    paths: [.github/workflows/locate-capture-stall.yml]
+permissions:
+  contents: read
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Observe existing four-shot acceptance without bypassing failure
+        run: python tests/teams_rounds_browser.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capture-operation-evidence
+          path: |
+            test-results/capture-*.json
+            test-results/round-*.json
+            test-results/teams-rounds-report.json
+          retention-days: 2

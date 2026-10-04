@@ -1,8 +1,7 @@
-/** TEST ONLY: observe presentation/callback/worker/encoder timing without changing
- * timestamps, video cadence, analysis results, frame-gap thresholds or recorder
- * options. Bounded arrays; no network/storage or pixel conversion here. */
+/** TEST ONLY: observe source/callback/worker/encoder timing without altering
+ * timestamps, results, cadence, recorder settings or frame-gap thresholds. */
 (() => {
-  const logs={source:[],presentation:[],callbacks:[],worker:[],encoders:[],longTasks:[],shots:[]};
+  const logs={source:[],presentation:[],callbacks:[],worker:[],encoders:[],longTasks:[],shots:[],operations:[]};
   const add=(name,value)=>{const a=logs[name];a.push(value);if(a.length>6000)a.shift();};
   const time=()=>performance.now();let lastSource=null,lastPresentation=null;
   const quantile=(values,q)=>{if(!values.length)return null;const v=values.slice().sort((a,b)=>a-b);return v[Math.floor((v.length-1)*q)];};
@@ -18,10 +17,21 @@
       sourceGaps:logs.source.filter(v=>v.interval>150).slice(-50),
       presentationGaps:logs.presentation.filter(v=>v.interval>150).slice(-50),
       slowWorkerTrips:logs.worker.filter(v=>v.ms>150).slice(-50),
-      longTasks:logs.longTasks.slice(-50),encoders:logs.encoders.slice(-50),shots:logs.shots.slice(-32),
+      operations:logs.operations.slice(-100),longTasks:logs.longTasks.slice(-50),encoders:logs.encoders.slice(-50),shots:logs.shots.slice(-32),
       meaning:'Observed timing, not sensor frame rate. Coincident encoder events do not prove causation.'
     })
   };
+  function measure(owner,name,label){
+    const original=owner?.[name];if(typeof original!=='function')return;
+    owner[name]=function(...args){const wall=time();let result;
+      try{return result=original.apply(this,args);}
+      finally{const ms=time()-wall;if(ms>4)add('operations',{wall,ms,operation:label,bytes:typeof result==='string'?result.length:undefined});}
+    };
+  }
+  measure(JSON,'stringify','JSON.stringify');
+  measure(IDBObjectStore.prototype,'put','IndexedDB.put');
+  measure(CanvasRenderingContext2D.prototype,'getImageData','canvas.getImageData');
+  measure(CanvasRenderingContext2D.prototype,'drawImage','canvas.drawImage');
   const original=HTMLVideoElement.prototype.requestVideoFrameCallback;
   if(original)HTMLVideoElement.prototype.requestVideoFrameCallback=function(fn){
     return original.call(this,(now,meta)=>{
@@ -34,7 +44,6 @@
     constructor(...args){super(...args);this.pending=new Map();
       this.addEventListener('message',({data:m})=>{
         const key=m.generation+':'+m.time,start=this.pending.get(key);
-        // Colour responses omit time, so pair them with the single in-flight frame.
         const entry=start??(m.type==='colours'?[...this.pending.values()].at(-1):null);
         if(entry){add('worker',{wall:time(),media:entry.media,ms:time()-entry.wall,type:m.type,frameGap:m.frameGap});this.pending.delete(key);if(m.type==='colours')this.pending.clear();}
         if(m.auto?.event)add('shots',structuredClone(m.auto.event));
