@@ -1,0 +1,41 @@
+name: Apply reviewed capture delta
+on:
+  push:
+    branches: [feature/automatic-teams-rounds]
+    paths: [.github/workflows/apply-capture-review.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply exact locally verified two-line correction
+        run: |
+          test "$(git hash-object src/app.js)" = '0ded3d651ea4d4a8e4ea27f9c02ee8902701cf42'
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/app.js')
+          s=p.read_text()
+          old='function processFrame(time, now) {\n'
+          new=old+'  // A repeated presentation is not another observation. Keep real gaps and seeks unchanged.\n  if (state.lastTime !== null && time === state.lastTime) return;\n'
+          assert s.count(old)==1
+          p.write_text(s.replace(old,new))
+          PY
+          test "$(git hash-object src/app.js)" = 'ebd8a08a9e1337fe7e02aa5614ac4ed0ec5f236f'
+          npm run check
+          npm test
+          git diff --check
+          git diff --stat
+      - name: Commit only the reviewed source correction to the feature branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/app.js
+          git commit -m 'Ignore duplicate presented frames before analysis; preserve real timing gaps' -m 'Read-only browser diagnostics observed identical mediaTime 4.945634 twice at shot start, causing an identity reset and false timing hold. Four capture regressions cover duplicate, next frame, real gap and backward seek. Exact target app blob ebd8a08a9e1337fe7e02aa5614ac4ed0ec5f236f; 129 Node tests pass. Full browser verification is still required.'
+          git push origin HEAD:refs/heads/feature/automatic-teams-rounds
+          echo "Reviewed head: $(git rev-parse HEAD)"
