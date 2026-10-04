@@ -51,10 +51,39 @@ jobs:
             test-results/offline-proof/**
           if-no-files-found: ignore
           retention-days: 7
+  cache-upgrade:
+    name: Returning-browser cache upgrade
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fetch exact previous one-shot release for a real warm-cache test
+        run: git fetch --depth=1 origin 616f9cf03caf17e0815925275d9fc04a71187526
+      - name: Verify entry asset versioning and prepare deployment-equivalent HTML
+        run: |
+          python tests/entry_assets_test.py
+          python tools/version_entry_assets.py .
+      - name: Install isolated Chromium and WebKit
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium webkit
+      - name: Require the new button to work without clearing old cache or saved data
+        run: python tests/cache_upgrade_browser.py --engines chromium,webkit
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cache-upgrade-evidence
+          path: |
+            test-results/cache-upgrade-report.json
+            test-results/cache-upgrade-*.png
+          retention-days: 7
   deploy:
     name: Publish GitHub Pages
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: test
+    needs: [test, cache-upgrade]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -73,6 +102,7 @@ jobs:
           mkdir -p _site
           cp index.html styles.css .nojekyll _site/
           cp -r src docs _site/
+          python tools/version_entry_assets.py _site
           python - <<'PY'
           import json, os, datetime
           from pathlib import Path
@@ -107,3 +137,23 @@ jobs:
           else:
               raise SystemExit('Published commit could not be verified; do not report deployment as verified.')
           PY
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify the public full-demo button through all 16 shots
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+          python tests/live_demo_smoke.py --url "$PAGE_URL" --commit "$GITHUB_SHA"
+      - name: Preserve actual published-page evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: published-demo-evidence
+          path: |
+            test-results/live-demo-report.json
+            test-results/live-full-demo-complete.png
+          if-no-files-found: ignore
+          retention-days: 7
