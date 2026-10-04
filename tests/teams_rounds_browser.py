@@ -22,6 +22,22 @@ with sync_playwright() as pw:
     for angled in [False,True]:
         context=browser.new_context(viewport={'width':1440,'height':1100},accept_downloads=True)
         page=context.new_page();page.on('pageerror',lambda e:errors.append(str(e)));page.on('dialog',lambda d:d.accept())
+        page.add_init_script('''(()=>{
+          const NativeWorker=window.Worker;window.roundTiming=[];
+          window.Worker=class extends NativeWorker {
+            constructor(...args){super(...args);let last=null,generation=null;
+              this.addEventListener('message',({data:m})=>{
+                if(m.type!=='result')return;
+                const dt=generation===m.generation&&last!==null?m.time-last:null;
+                if(dt===null||dt<=0||dt>.15||m.frameGap||m.auto?.event){
+                  window.roundTiming.push({time:m.time,previous:last,dt,generation:m.generation,gap:m.frameGap,event:m.auto?.event?.type,ids:m.discs.map(d=>d.id)});
+                  if(window.roundTiming.length>100)window.roundTiming.shift();
+                }
+                last=m.time;generation=m.generation;
+              });
+            }
+          };
+        })();''')
         page.add_init_script((ROOT/'tests/synthetic_camera.js').read_text());page.goto(base,wait_until='networkidle')
         page.evaluate('(a)=>{syntheticCamera.angled=a}',angled)
         page.locator('#round-allocation').fill('2');page.locator('#round-allocation').press('Tab')
@@ -52,6 +68,7 @@ with sync_playwright() as pw:
             expect(page.locator('#clip-count')).to_have_text(str(i+1),timeout=20000)
             with page.expect_download() as download:page.locator('#export-session').click()
             target=OUT/f'round-{angled}-{i}.json';download.value.save_as(str(target));payload=json.loads(target.read_text())
+            timing=page.evaluate('roundTiming');(OUT/f'round-timing-{angled}-{i}.json').write_text(json.dumps(timing,indent=2));print('ROUND TIMING',timing,flush=True)
             event=payload['clips'][0]['autoResult'];print('ROUND EVENT',angled,i,event,'COUNTER',payload['roundTracking'],flush=True)
             assert event and not event['hadObstruction'] and not event['twentyCandidates']
             if i<3:
