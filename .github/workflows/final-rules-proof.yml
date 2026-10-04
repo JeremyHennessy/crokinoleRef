@@ -1,0 +1,68 @@
+name: Verify final demo rules and capture recovery
+on:
+  push:
+    branches: [work/final-rules-proof]
+    paths: [.github/workflows/final-rules-proof.yml, .review/final-edits.json]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply exact isolated edits
+        run: |
+          python - <<'PY'
+          import hashlib,json,subprocess
+          from pathlib import Path
+          edits=json.loads(Path('.review/final-edits.json').read_text())
+          for e in edits:
+              p=Path(e['path']);assert not p.is_absolute() and '..' not in p.parts and p.parts[0] not in ('.github','.review')
+              old=p.read_text();assert hashlib.sha256(old.encode()).hexdigest()==e['before'],str(p)
+              new=old
+              for a,b,text in reversed(e['ops']):
+                  assert 0<=a<=b<=len(old)
+                  new=new[:a]+text+new[b:]
+              assert hashlib.sha256(new.encode()).hexdigest()==e['after'],str(p)
+              p.write_text(new)
+          subprocess.run(['git','add','--',*[e['path'] for e in edits]],check=True)
+          PY
+          git diff --cached --check
+          cp .git/index /tmp/clean-index
+          GIT_INDEX_FILE=/tmp/clean-index git rm --cached .review/final-edits.json .github/workflows/final-rules-proof.yml
+          test "$(GIT_INDEX_FILE=/tmp/clean-index git write-tree)" = fc9e9ce6bd5b56cee6378238ae5871270ea6325d
+          npm run check && npm test
+      - name: Install browser
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Verify demo and capture timing/review recovery
+        run: |
+          python tests/full_round_demo_browser.py
+          python tests/capture_timing_browser.py
+      - name: Commit verified source only to temporary work branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Resolve demo rules after movement and measure capture recovery' -m 'Exact clean tree fc9e9ce6bd5b56cee6378238ae5871270ea6325d. Node and dedicated browser proofs passed. No change to live evidence thresholds or referee logic. Full release suite remains required.'
+          git push origin HEAD:refs/heads/work/final-rules-proof
+      - name: Preserve exact candidate
+        if: always()
+        run: git archive --format=tar $(git write-tree) > /tmp/final-rules-candidate.tar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: final-rules-proof
+          path: |
+            /tmp/final-rules-candidate.tar
+            test-results/*.json
+            test-results/full-demo*.png
+            test-results/physics-demo.webm
+          retention-days: 3
