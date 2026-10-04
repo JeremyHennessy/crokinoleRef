@@ -1,0 +1,27 @@
+name: Isolated frame-stage diagnosis
+on:
+  push:
+    branches: [review/frame-stage-profile]
+    paths: [.github/workflows/frame-stage-profile.yml, tests/frame_stage_profile.py]
+permissions:
+  contents: read
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Measure actual canvas and worker stages on the unchanged candidate
+        run: python tests/frame_stage_profile.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frame-stage-profile
+          path: test-results/frame-stage-profile.json
+          retention-days: 3
