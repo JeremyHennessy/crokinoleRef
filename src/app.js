@@ -4,6 +4,7 @@ import { projectPoint, samplingMatrix } from './perspective.js';
 import { autoCalibrateFrame, scaleAutoProjectionToSource } from './auto-calibration.js';
 import { scoreSettledBoard } from './auto-referee.js';
 import { RollingClipBuffer, createCapture } from './clip-buffer.js';
+import { installGameAutomation } from './game-automation.js';
 const $ = id => document.getElementById(id);
 const board = $('board'), ctx = board.getContext('2d');
 const video = $('source-video'), raw = document.createElement('canvas'), rawCtx = raw.getContext('2d', { willReadFrequently: true });
@@ -11,6 +12,7 @@ const small = document.createElement('canvas'), smallCtx = small.getContext('2d'
 const smart = document.createElement('canvas'), smartCtx = smart.getContext('2d', { willReadFrequently: true });
 const MB = 1024 * 1024, MAX_CLIP = 64 * MB, MAX_TOTAL = 256 * MB, MAX_CLIPS = 30;
 let previewMatch = null;
+let game;
 const state = { mode: 'idle', token: 0, generation: 0, stream: null, sourceURL: null, callback: null, raf: null, calibration: null, projection: null, background: null, colors: [null, null], discs: [], contacts: [], calibrationPoints: null, sampleTeam: null, smartBusy: false, inflight: false, time: 0, lastTime: null, gaps: [], observed: 0, analysed: 0, statStart: performance.now(), fps: 0, analysisFps: 0, clips: [], selected: null, recording: null, settings: {}, names: ['Team A', 'Team B'], scores: [0, 0], totals: [0, 0], rounds: [], undo: [], round: 1, demoStart: 0, auto: { twenties: [0, 0], adjustments: [0, 0], reviewHold: false, awaitingClear: false, shotCount: 0, activeShotNumber: null, lastResult: null, lastLiveScore: null, stopTimer: null } };
 const clipBuffer = new RollingClipBuffer({
   sourceTime: () => Number.isFinite(video.currentTime) ? video.currentTime : state.time,
@@ -46,11 +48,12 @@ const guide = new CalibrationGuide({
 });
 let worker;
 try {
-  worker = new Worker(new URL('./vision-worker.js?referee=2', import.meta.url), { type: 'module' });
+  worker = new Worker(new URL('./vision-worker.js?teams=1', import.meta.url), { type: 'module' });
   worker.onmessage = ({ data: m }) => {
     if (m.generation !== state.generation) return;
     state.inflight = false;
     if (m.type === 'error') { notify(`Tracking stopped: ${m.message}. Recording and manual scoring remain available.`, true); worker.terminate(); worker = null; clipBuffer.stop(); return; }
+    if(m.type==='colours'){game.colours(m);return;}
     state.analysed++; state.discs = m.discs;
     $('disc-count').textContent = String(m.discs.length);
     for (const event of m.contacts) {
@@ -62,6 +65,7 @@ try {
       const e = m.contacts[0]; $('contact-status').textContent = `${state.mode === 'demo' ? 'SIMULATED · ' : ''}Possible contact: disc ${e.ids[0]} ↔ ${e.ids[1]}. Proximity only; impact and first-contact order need human review.`;
     }
     if (m.auto) handleAutoUpdate(m.auto);
+    game.onFrame(m);
   };
   worker.onerror = () => { state.inflight = false; worker?.terminate(); worker = null; clipBuffer.stop(); notify('Vision worker unavailable. Camera, replay and manual scoring can still be used.', true); };
 } catch { notify('This browser cannot start the tracking worker. Recording and manual scoring remain available.', true); }
@@ -73,6 +77,7 @@ function analysisCalibration() {
   return state.projection ? state.calibration : scaleCalibration(state.calibration, small.width / board.width);
 }
 function configureWorker() {
+  game?.onReconfigure();
   clipBuffer.stop(); // Never keep lead-in footage from a different calibration/source generation.
   state.auto.activeShotNumber=null;
   state.auto.lastLiveScore=null;
@@ -80,7 +85,7 @@ function configureWorker() {
   if(state.recording?.auto){state.recording.error=true;finishClip();}
   state.generation++; state.inflight = false; state.discs = []; state.contacts = []; $('disc-count').textContent = '—';
   const scale = small.width / board.width;
-  worker?.postMessage({ type: 'configure', generation: state.generation, calibration: analysisCalibration(), warp: state.projection ? { matrix: samplingMatrix(state.projection, scale), width: small.width, height: small.height } : null, requireEmpty: state.auto.awaitingClear, background: state.background, colors: state.colors, tolerance: +$('tolerance').value });
+  worker?.postMessage({ type: 'configure', generation: state.generation, calibration: analysisCalibration(), warp: state.projection ? { matrix: samplingMatrix(state.projection, scale), width: small.width, height: small.height } : null, requireEmpty: state.auto.awaitingClear, background: state.background, colors: state.colors, autoColours: $('auto-colours').checked, tolerance: +$('tolerance').value });
   $('contact-status').textContent = 'First-contact order is not verified. Proximity candidates are not referee decisions.';
   updateControls();
 }
@@ -94,7 +99,7 @@ function updateControls() {
   $('sample-a').disabled = !state.background || busy || calibrating; $('sample-b').disabled = !state.background || busy || calibrating;
   ['camera', 'capture-mode', 'calibration-mode', 'import-video', 'import-button', 'tolerance', 'refresh-cameras'].forEach(id => { $(id).disabled = busy || smartBusy; });
   $('demo').disabled = busy; $('cancel-calibrate').hidden = !calibrating && state.sampleTeam === null;
-  $('tracking-status').textContent = !worker ? 'Tracking unavailable in this browser' : readyToTrack() ? 'Continuous puck tracking ready · analysing delivered frames' : !state.calibration ? 'Waiting for calibration' : !state.background ? 'Next: save an empty board' : 'Next: sample both team colours';
+  $('tracking-status').textContent = !worker ? 'Tracking unavailable in this browser' : readyToTrack() ? 'Continuous puck tracking ready · analysing delivered frames' : !state.calibration ? 'Waiting for calibration' : !state.background ? 'Next: save an empty board' : ($('auto-colours').checked?'Next: show one still puck of each colour':'Next: sample both team colours');
   $('calibration-status').textContent = state.calibration ? `${Number.isFinite(state.projection?.autoConfidence) ? `Smart fit ${Math.round(state.projection.autoConfidence * 100)}%` : state.projection ? 'Perspective fit' : state.mode === 'demo' ? 'Demo geometry' : 'Overhead fit'} · ${Math.round(state.calibration.discRadius * 2)} px puck diameter${state.projection ? ' in corrected view' : ''}` : state.smartBusy ? 'Finding board automatically…' : 'Not calibrated';
   $('file-controls').hidden = state.mode === 'file' ? false : true;
   $('record-hint').textContent = state.mode === 'demo' ? 'Demo is synthetic. Connect a camera to record real evidence.' : !window.MediaRecorder ? 'Recording is unavailable in this browser. You can still import clips.' : $('auto-clips')?.checked ? ($('pre-roll').checked ? 'Auto clips retain the pre-shot lead-in once warmed up, then finish after settlement. Buffer status is in setup.' : 'Auto clips start on detected motion; pre-shot buffering is off.') : 'Manual clip mode: start before shooting. Clips stop after 30 seconds.';
@@ -102,6 +107,7 @@ function updateControls() {
 }
 function resetStats() { state.lastTime = null; state.time = 0; state.gaps = []; state.observed = state.analysed = 0; state.fps = state.analysisFps = 0; state.statStart = performance.now(); $('observed-fps').textContent = '—'; $('frame-gap').textContent = '—'; }
 function resetAutoRound() {
+  game?.resetRound();
   state.auto.twenties = [0, 0]; state.auto.adjustments=[0,0];state.auto.reviewHold=false;state.auto.awaitingClear=true; state.auto.shotCount = 0; state.auto.activeShotNumber = null; state.auto.lastResult = null; state.auto.lastLiveScore = null;
   configureWorker(); // New generation rejects any late events from the old round.
   if ($('auto-status')) $('auto-status').textContent = readyToTrack() ? 'Ready · watching for puck movement' : 'Waiting for disc tracking';
@@ -167,6 +173,7 @@ function handleAutoUpdate(auto) {
   }
 }
 function enterPreview() {
+  game.enterPreview();
   previewMatch=JSON.stringify({names:state.names,scores:state.scores,totals:state.totals,rounds:state.rounds,round:state.round,undo:state.undo,auto:state.auto,mode:$('score-mode').value});
   state.scores=[0,0];state.totals=[0,0];state.rounds=[];state.round=1;state.undo=[];
   state.auto={twenties:[0,0],adjustments:[0,0],reviewHold:false,awaitingClear:false,shotCount:0,activeShotNumber:null,lastResult:null,lastLiveScore:null,stopTimer:null};
@@ -174,6 +181,7 @@ function enterPreview() {
 }
 function exitPreview() {
   if(!previewMatch)return;
+  game.exitPreview();
   const {mode,...saved}=JSON.parse(previewMatch);previewMatch=null;
   Object.assign(state,saved);$('score-mode').value=mode;renderScore();
 }
@@ -261,7 +269,7 @@ function processFrame(time, now) {
   if (state.calibrationPoints || state.sampleTeam !== null) return;
   if (state.mode !== 'demo') rawCtx.drawImage(video, 0, 0, raw.width, raw.height);
   ctx.drawImage(raw, 0, 0); drawOverlay();
-  if (readyToTrack() && !state.inflight && !document.hidden) {
+  if ((readyToTrack() || (worker && state.calibration && state.background && $('auto-colours').checked)) && !state.inflight && !document.hidden) {
     smallCtx.drawImage(raw, 0, 0, small.width, small.height);
     const image = smallCtx.getImageData(0, 0, small.width, small.height);
     state.inflight = true;
@@ -338,15 +346,16 @@ board.addEventListener('click', event => {
   const team = state.sampleTeam, image = rawCtx.getImageData(0, 0, raw.width, raw.height);
   const color = averageColor(image.data, raw.width, raw.height, p.x, p.y), other = state.colors[1 - team];
   if (other && Math.hypot(...color.map((v, i) => v - other[i])) < 35) { notify('These colour samples are too similar. Sample the solid centre of differently coloured pucks.', true); return; }
-  state.colors[team] = color; state.sampleTeam = null; $('stage').classList.remove('calibrating');
+  state.colors[team] = color; game.renderPalette(); state.sampleTeam = null; $('stage').classList.remove('calibrating');
   $('stage-hint').textContent = `Team ${team === 0 ? 'A' : 'B'} colour sampled. Tracking remains experimental.`; configureWorker();
 });
 function saveBackground() {
   if (!state.calibration || state.recording) return;
   smallCtx.drawImage(raw, 0, 0, small.width, small.height); state.background = smallCtx.getImageData(0, 0, small.width, small.height).data;
-  configureWorker(); notify('Empty-board reference captured. Now place one disc from each team on the board and sample their centres.');
+  configureWorker(); notify('Empty-board reference captured. Place one separate puck of each colour on the board and lift your hands. Team colours will be detected automatically; manual sampling is a fallback.');
 }
 function sampleTeam(team) {
+  $('auto-colours').checked=false;
   if (!state.background || state.recording) return;
   state.sampleTeam = team; state.calibrationPoints = null; ctx.drawImage(raw, 0, 0); $('stage').classList.add('calibrating');
   $('stage-hint').textContent = `Click the solid centre of a TEAM ${team === 0 ? 'A' : 'B'} disc. View frozen.`; updateControls();
@@ -501,10 +510,10 @@ function openReplay(id) {
 }
 function download(blob, name) { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 15000); }
 function exportSession() {
-  const payload = { schemaVersion: 2, appVersion: VERSION, exportedAt: new Date().toISOString(), automaticVerdictsEnabled: false, sessionIsPreview:!!previewMatch, automaticScoringEnabled: !!$('auto-scoring')?.checked, automaticClipsEnabled: !!$('auto-clips')?.checked, autoReferee: { twenties: state.auto.twenties, adjustments:state.auto.adjustments, reviewHold:state.auto.reviewHold, shotCount: state.auto.shotCount, lastResult: state.auto.lastResult }, activeConfiguration: configSnapshot(), match: { names: state.names, mode: $('score-mode').value, scores: state.scores, totals: state.totals, round: state.round, rounds: state.rounds }, clips: state.clips.map(({ blob, url, ...c }) => ({ ...c, videoIncluded: false, videoMime: blob.type, videoBytes: blob.size })), limitations: ['No automatic first-contact or foul decisions.', 'Proximity is not proof of impact.', 'Angled calibration corrects the board plane, not occlusion, lens distortion or puck/peg height.', 'Video must be exported separately.', 'Observed callbacks are not a sensor-frame guarantee.'] };
+  const payload = { schemaVersion: 2, appVersion: VERSION, exportedAt: new Date().toISOString(), automaticVerdictsEnabled: false, sessionIsPreview:!!previewMatch, automaticScoringEnabled: !!$('auto-scoring')?.checked, automaticClipsEnabled: !!$('auto-clips')?.checked, roundTracking: game.snapshot(), autoReferee: { twenties: state.auto.twenties, adjustments:state.auto.adjustments, reviewHold:state.auto.reviewHold, shotCount: state.auto.shotCount, lastResult: state.auto.lastResult }, activeConfiguration: configSnapshot(), match: { names: state.names, mode: $('score-mode').value, scores: state.scores, totals: state.totals, round: state.round, rounds: state.rounds }, clips: state.clips.map(({ blob, url, ...c }) => ({ ...c, videoIncluded: false, videoMime: blob.type, videoBytes: blob.size })), limitations: ['No automatic first-contact or foul decisions.', 'Proximity is not proof of impact.', 'Angled calibration corrects the board plane, not occlusion, lens distortion or puck/peg height.', 'Video must be exported separately.', 'Observed callbacks are not a sensor-frame guarantee.'] };
   download(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), `crokinole-match-${new Date().toISOString().slice(0, 10)}.json`);
 }
-function saveMatch() { if(previewMatch)return; try { localStorage.setItem('crokinole-ref-match-v1', JSON.stringify({ names: state.names, scores: state.scores, totals: state.totals, rounds: state.rounds, round: state.round, mode: $('score-mode').value, autoTwenties: state.auto.twenties, autoAdjustments: state.auto.adjustments, autoReviewHold: state.auto.reviewHold, autoShotCount: state.auto.shotCount })); } catch { notify('Browser storage is unavailable. Export the match log before closing.', true); } }
+function saveMatch() { if(previewMatch)return; try { localStorage.setItem('crokinole-ref-match-v1', JSON.stringify({ names: state.names, scores: state.scores, totals: state.totals, rounds: state.rounds, round: state.round, mode: $('score-mode').value, roundTracking: game.snapshot(), autoTwenties: state.auto.twenties, autoAdjustments: state.auto.adjustments, autoReviewHold: state.auto.reviewHold, autoShotCount: state.auto.shotCount })); } catch { notify('Browser storage is unavailable. Export the match log before closing.', true); } }
 function loadMatch() {
   try {
     const data = JSON.parse(localStorage.getItem('crokinole-ref-match-v1') || 'null');
@@ -512,10 +521,10 @@ function loadMatch() {
     const pair = v => Array.isArray(v) && v.length === 2 && v.every(n => Number.isSafeInteger(n) && n >= 0);
     if (!Array.isArray(data.rounds) || !data.rounds.every(r => r && Number.isSafeInteger(r.round) && r.round > 0 && pair(r.scores) && pair(r.awarded) && ['match', 'difference'].includes(r.mode))) return;
     if (!pair(data.scores) || !pair(data.totals) || !Number.isSafeInteger(data.round) || data.round < 1 || !Array.isArray(data.rounds) || !Array.isArray(data.names) || data.names.length !== 2 || !data.names.every(n => typeof n === 'string') || !['match', 'difference'].includes(data.mode)) return;
-    state.names = data.names.map(n => n.slice(0, 40)); state.scores = data.scores; state.totals = data.totals; state.rounds = data.rounds.slice(-100); state.round = data.round; $('score-mode').value = data.mode; if (pair(data.autoTwenties)) state.auto.twenties = data.autoTwenties; if(pair(data.autoAdjustments))state.auto.adjustments=data.autoAdjustments;state.auto.reviewHold=!!data.autoReviewHold; if (Number.isSafeInteger(data.autoShotCount) && data.autoShotCount >= 0) state.auto.shotCount = data.autoShotCount;
+    game.restore(data.roundTracking); state.names = data.names.map(n => n.slice(0, 40)); state.scores = data.scores; state.totals = data.totals; state.rounds = data.rounds.slice(-100); state.round = data.round; $('score-mode').value = data.mode; if (pair(data.autoTwenties)) state.auto.twenties = data.autoTwenties; if(pair(data.autoAdjustments))state.auto.adjustments=data.autoAdjustments;state.auto.reviewHold=!!data.autoReviewHold; if (Number.isSafeInteger(data.autoShotCount) && data.autoShotCount >= 0) state.auto.shotCount = data.autoShotCount;
   } catch { /* Corrupt or disabled local storage is not fatal. */ }
 }
-function snapshotScore() { state.undo.push(JSON.stringify({ scores: state.scores, totals: state.totals, rounds: state.rounds, round: state.round, mode: $('score-mode').value, autoTwenties: state.auto.twenties, autoAdjustments: state.auto.adjustments, autoReviewHold: state.auto.reviewHold, autoShotCount: state.auto.shotCount })); state.undo = state.undo.slice(-100); }
+function snapshotScore() { state.undo.push(JSON.stringify({ roundTracking:game.snapshot(), scores: state.scores, totals: state.totals, rounds: state.rounds, round: state.round, mode: $('score-mode').value, autoTwenties: state.auto.twenties, autoAdjustments: state.auto.adjustments, autoReviewHold: state.auto.reviewHold, autoShotCount: state.auto.shotCount })); state.undo = state.undo.slice(-100); }
 function renderScore() {
   $('players').replaceChildren();
   for (let team = 0; team < 2; team++) {
@@ -535,6 +544,7 @@ function renderScore() {
   $('undo-score').disabled = !state.undo.length; $('score-mode').disabled = state.rounds.length > 0;
   $('round-history').replaceChildren();
   for (const r of [...state.rounds].reverse().slice(0, 10)) { const row = document.createElement('div'); row.className = 'round-entry'; row.textContent = `Round ${r.round}: ${r.scores?.join(' – ')} → awarded ${r.awarded?.join(' – ')}`; $('round-history').append(row); }
+  game?.renderPalette();
 }
 $('connect').onclick = connect; $('refresh-cameras').onclick = listCameras; $('stop-source').onclick = stopSource; $('demo').onclick = startDemo;
 $('auto-calibrate').onclick = () => smartCalibrate(false); $('calibrate').onclick = startCalibration; $('cancel-calibrate').onclick = cancelCalibration; $('background').onclick = saveBackground;
@@ -564,17 +574,20 @@ $('seek-back').onclick = () => seekReplay(-1 / 30); $('seek-forward').onclick = 
 $('download-clip').onclick = () => { const c = state.clips.find(v => v.id === state.selected); if (c) download(c.blob, c.originalName || `crokinole-${c.id}.${c.blob.type.includes('mp4') ? 'mp4' : 'webm'}`); };
 $('save-verdict').onclick = () => { const c = state.clips.find(v => v.id === state.selected); if (c) { c.verdict = $('verdict').value; c.note = $('review-note').value.trim(); c.reviewedAt = new Date().toISOString(); c.decisionSource = 'human'; renderClips(); $('replay-dialog').close(); notify('Manual decision saved in this tab. Export the match log to preserve your notes. Scores are unchanged.'); } };
 $('export-session').onclick = exportSession;
-$('finish-round').onclick = () => {
+function finishRound(automatic = false) {
   if(state.recording||state.auto.activeShotNumber!==null)return notify('Wait for the current shot and clip to finish before ending the round.',true);
-  if (!confirm(`Finish round ${state.round} with ${state.scores[0]} – ${state.scores[1]} points?`)) return;
+  if (!automatic && !confirm(`Finish round ${state.round} with ${state.scores[0]} – ${state.scores[1]} points?`)) return false;
   snapshotScore(); const awarded = roundResult(...state.scores, $('score-mode').value);
-  state.rounds.push({ round: state.round, scores: [...state.scores], awarded, mode: $('score-mode').value });
+  state.rounds.push({ round: state.round, scores: [...state.scores], awarded, mode: $('score-mode').value, source: automatic?'automatic':'player', shotCountEvidence: game.snapshot() });
   state.totals = state.totals.map((n, i) => n + awarded[i]); state.scores = [0, 0]; state.round++; resetAutoRound(); saveMatch(); renderScore();
-};
-$('undo-score').onclick = () => { const previous = state.undo.pop(); if (previous) { const { mode, autoTwenties, autoAdjustments, autoReviewHold, autoShotCount, ...values } = JSON.parse(previous); Object.assign(state, values); if (Array.isArray(autoTwenties)) state.auto.twenties = autoTwenties; if(Array.isArray(autoAdjustments))state.auto.adjustments=autoAdjustments;state.auto.reviewHold=!!autoReviewHold;$('auto-scoring').checked=false; if (Number.isSafeInteger(autoShotCount)) state.auto.shotCount = autoShotCount; $('score-mode').value = mode; saveMatch(); renderScore(); } };
+  return true;
+}
+$('finish-round').onclick=()=>finishRound(false);
+$('undo-score').onclick = () => { const previous = state.undo.pop(); if (previous) { const { mode, roundTracking, autoTwenties, autoAdjustments, autoReviewHold, autoShotCount, ...values } = JSON.parse(previous); if(roundTracking&&values.round!==state.round)game.restore(roundTracking); Object.assign(state, values); if (Array.isArray(autoTwenties)) state.auto.twenties = autoTwenties; if(Array.isArray(autoAdjustments))state.auto.adjustments=autoAdjustments;state.auto.reviewHold=!!autoReviewHold;$('auto-scoring').checked=false; if (Number.isSafeInteger(autoShotCount)) state.auto.shotCount = autoShotCount; $('score-mode').value = mode; saveMatch(); renderScore(); } };
 $('score-mode').onchange = saveMatch;
 $('new-match').onclick = () => { if(state.recording||state.auto.activeShotNumber!==null)return notify('Finish the current shot first.',true); if (!confirm('Start a new match? Scores and round history will reset. Clips remain in this tab.')) return; snapshotScore(); state.scores = [0, 0]; state.totals = [0, 0]; state.rounds = []; state.round = 1; resetAutoRound(); saveMatch(); renderScore(); };
 document.addEventListener('visibilitychange', () => { if (document.hidden && state.recording) { state.recording.trackingGaps++; notify('Tab hidden: tracking may pause. Recording may continue, but contact evidence can be incomplete.', true); } resetStats(); configureWorker(); });
 window.addEventListener('beforeunload', e => { if (state.clips.length || state.recording) { e.preventDefault(); e.returnValue = ''; } });
 window.addEventListener('pagehide', () => { clipBuffer.stop(); state.stream?.getTracks().forEach(t => t.stop()); });
+game=installGameAutomation({state,getCalibration:analysisCalibration,readyToTrack,reconfigure:configureWorker,updateControls,saveMatch,finishRound,notify});
 loadMatch(); renderScore(); updateControls(); listCameras();

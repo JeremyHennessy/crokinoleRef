@@ -1,3 +1,17 @@
+## New: no colour clicks or routine Finish-round clicks
+
+1. Keep your existing camera/calibration setup. Save the empty-board reference.
+2. Show one separate puck of each colour on the playing surface, away from the centre hole. Keep both still and lift your hands. With **Detect team colours automatically** on, the labels will show the locked assignments. Do not assume Team A is a particular person; use the labels/team names. Manual sample buttons are a fallback.
+3. Choose **Shots per team** once: 12 by default (casual/doubles), 8 for WCC singles, or 1–12 for practice. Remove the two teaching pucks. An unobstructed clear board starts counting.
+4. Play alternating teams. Each observed new puck entering from the shooting edge and travelling inward consumes a shot. The app shows remaining shots. It does not count every collision as a shot, infer a round end from silence, or count surviving pucks as remaining shots.
+5. After the final allocated shot, the app waits for settlement, resolution of any score review, and the last recording to close; then it records the result and advances exactly one round. Clear the board for the next round. No routine Finish-round click is needed.
+
+If a launch is missed/hidden, the turn sequence is inconsistent, or the camera is interrupted, automatic completion pauses. Open **Correct an uncertain shot count**, enter the number of UNPLAYED pucks remaining for A and B, and confirm. Review the board score before continuing. The existing Finish-round button and Undo remain available. The camera cannot prove whether a hand-carried disc was flicked; real-game behaviour still needs validation.
+
+Possible 20s still need player confirmation. Team-colour learning and round progress are experimental; same-colour touching discs, glare, hand occlusion and very fast launches can require the fallback. Buffered clips are not redesigned by this change.
+
+---
+
 # First game setup
 
 ## Smart setup — start here

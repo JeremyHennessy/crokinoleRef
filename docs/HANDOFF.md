@@ -1,3 +1,17 @@
+# Current handoff — automatic teams and round completion
+
+Baseline for this change: main `010cf2c6f1404cb2175d89949b7aca3fb06ee65e`, tree `2715e7f382e25b32c885fd0600cb09bc39fe046e`. This contains pre-shot buffering; do not replace it with older unbuffered code. New work is isolated to `feature/automatic-teams-rounds`. This is not a user-approved visual checkpoint.
+
+New pure modules: `team-colours.js` learns two stable, separated circular foreground colours using the existing empty-board reference; `round-tracker.js` counts new edge-launch pucks with observed inward travel and alternating teams. `game-automation.js` integrates palette/round controls with the existing application, score ledger and recorder. No edits to clip-buffer, core detector, auto-referee, perspective/calibration math or existing styles.
+
+Round format is an explicit one-time configuration, not inferred from off-board piles: default 12 shots/team, 1–12 configurable, WCC singles 8 and doubles 12/team. Unknown launches, count/turn inconsistency, interruption and reloaded progress require count review. Count corrections also hold score review. Clean completion needs both allocations exhausted, latest score matching the accepted scoreboard, no review hold or moving shot, and no unfinished recording. New rounds require board clearance. No automatic 20/foul/first-contact decision is added.
+
+Local 124 Node tests and syntax checks passed before the first full-browser attempt. The local Chromium localhost navigation is blocked by administrator policy; do not bypass it. Full camera/browser verification runs in GitHub Actions. The new positive browser proof must learn colours and complete an entire short round without sample buttons or Finish round, for both overhead and angled synthetic streams. Existing buffered-clip pixel-clock proof must remain passing. Final CI results and Pages deployment are separate gates; do not claim release from this note.
+
+No physical webcam recordings are available for validating real game accuracy. Never publish room footage without explicit permission. Temporary source-transfer files/workflow are removed before the implementation commit; verify the exact Git tree before merging.
+
+---
+
 # Current handoff — pre-shot buffering
 
 Current recording baseline: deployed `3afc3d757c99cb05e0957662c0a0348f95b46fdb` (PR #6). Pre-roll work is on `feature/buffered-shot-clips`. See `docs/BUFFERING.md` for the design, limits and release gates. Do not confuse a branch or a documentation statement with a verified Pages deployment.
