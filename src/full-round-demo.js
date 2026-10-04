@@ -1,6 +1,6 @@
-import { DemoRound } from './demo-round.js';
+import { DemoRound } from './demo-round.js?physics=1';
 
-/** UI-only simulation adapter. Never opens media devices, records clips, writes
+/** UI-only physical-demo adapter. Never opens media devices, records clips, writes
  * storage, or calls the live round counter. The app's preview boundary restores
  * the real match when exiting. Only the animation clock is speed-adjustable. */
 export class FullRoundDemo {
@@ -47,10 +47,10 @@ export class FullRoundDemo {
     if(!this.active)return;
     this.frame=this.model.at(this.elapsed);
     const f=this.frame;
-    this.paint(f.discs);this.processFrame(f.time,now);
+    this.paint(f.discs,f.contacts);this.processFrame(f.time,now);
     if(f.phase==='complete'&&!this.finished){
       this.finished=true;
-      this.state.rounds.push({round:f.round,scores:[...f.scores],awarded:[...f.awarded],mode:this.model.mode,source:'scripted-demo',shotCountEvidence:{source:'scripted-demo',used:[8,8]}});
+      this.state.rounds.push({round:f.round,scores:[...f.scores],awarded:[...f.awarded],mode:this.model.mode,source:'physics-demo',shotCountEvidence:{source:'physics-demo',used:[8,8]}});
       this.state.totals=this.state.totals.map((v,i)=>v+f.awarded[i]);
     }
     const key=`${f.round}:${f.completed}:${f.phase}`;
@@ -64,7 +64,7 @@ export class FullRoundDemo {
     const list=this.$('demo-shot-log');list.replaceChildren();
     for(const h of this.frame.history){
       const li=document.createElement('li');
-      li.textContent=`${h.team===0?'Blue / A':'Red / B'} · ${h.title} · score ${h.scores.join('–')}${h.twenty?' · scripted 20':''}`;
+      li.textContent=`${h.team===0?'Blue / A':'Red / B'} · ${h.title} · score ${h.scores.join('–')}${h.twenty?' · simulated 20':''}`;
       list.append(li);
     }
   }
@@ -74,7 +74,7 @@ export class FullRoundDemo {
     const who=f.scores[0]===f.scores[1]?'Tie':`${f.scores[0]>f.scores[1]?'Blue / A':'Red / B'} wins by ${Math.abs(f.scores[0]-f.scores[1])}`;
     const heading=ended?`Round ${f.round} finished · ${who} · ${f.scores.join('–')}`:`${this.paused?'Paused · ':''}Shot ${f.completed+1} of 16 · ${f.team===0?'Blue / A':'Red / B'} · ${f.phase==='shooting'?'in motion':f.phase==='settling'?'settling':'lining up'}`;
     if($('demo-round-status').textContent!==heading)$('demo-round-status').textContent=heading;
-    const panel=$('full-round-controls');panel.dataset.completed=String(f.completed);panel.dataset.phase=f.phase;panel.dataset.round=String(f.round);panel.dataset.score=f.scores.join(',');panel.dataset.paused=String(this.paused);
+    const panel=$('full-round-controls');panel.dataset.engine='swept-circle-v1';panel.dataset.completed=String(f.completed);panel.dataset.phase=f.phase;panel.dataset.round=String(f.round);panel.dataset.score=f.scores.join(',');panel.dataset.paused=String(this.paused);
     $('demo-progress').value=f.completed;
     $('demo-shot-caption').textContent=ended?'The complete round stays on screen. Replay it, begin the next demo round, or return to your real match.':f.title;
     $('demo-ledger').textContent=`Board: A ${f.boardScores[0]} · B ${f.boardScores[1]} | Banked 20s: A ${f.twenties[0]} · B ${f.twenties[1]} | Shots left: A ${f.remaining[0]} · B ${f.remaining[1]}`;
@@ -84,8 +84,8 @@ export class FullRoundDemo {
     if(ended)$('demo-result').textContent=`${who}. Round award: A ${f.awarded[0]} · B ${f.awarded[1]} (${this.model.mode==='match'?'match points':'point difference'}). Demo match total: ${this.state.totals.join('–')}.`;
     $('play-score').textContent=`Blue / A ${f.scores[0]} — ${f.scores[1]} Red / B · Demo round ${f.round}`;
     $('play-state').textContent=heading;
-    $('play-remaining').textContent=`${f.completed}/16 scripted shots complete · ${f.remaining.join(' / ')} remaining · demo only`;
-    $('score-badge').textContent='Scripted demo score';
+    $('play-remaining').textContent=`${f.completed}/16 simulated shots complete · ${f.remaining.join(' / ')} remaining · demo only`;
+    $('score-badge').textContent='Simulated demo score';
   }
   visibilityChanged(){if(this.active&&document.hidden){this.paused=true;this.previousNow=null;this.renderStatus();}}
   stop(){
