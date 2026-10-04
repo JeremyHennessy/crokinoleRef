@@ -10,12 +10,12 @@ A GitHub Pages interface for a local-first crokinole webcam, replay and scoring 
 - Camera-reported frame rate, observed video callbacks, analysed callbacks and recent largest frame interval shown separately.
 - Smart calibration is now the primary setup path: it automatically detects the round playing surface, 20 hole and three scoring rings, rectifies the board plane, estimates initial puck size, and asks for visual confirmation instead of requiring calibration clicks.
 - The illustrated nine-click angled / six-click overhead guide remains as a manual fallback, with numbered markers, magnifier, undo, retake and explicit preview confirmation.
-- Experimental board-plane perspective correction from four actual quadrant marks with the centre in the best-fit solution. Empty-board reference and sampled team colours.
+- Experimental board-plane perspective correction from four actual quadrant marks with the centre in the best-fit solution. Empty-board reference and automatic or manually sampled team colours.
 - Worker-based background/colour detector with continuous puck identity tracking and review-only proximity candidates. Angled input and background are rectified together; overlays are projected back onto the original camera view.
 - Automatic shot segmentation from tracked puck motion and settlement. Camera clips retain an optional rolling pre-shot lead-in (nominally 2–4 seconds after warm-up) and stop after the board settles; manual recording remains available.
 - Automatic settled-board scoring for visible pucks, plus review flags for possible 20s. A disappearing puck is never sufficient to award 20 automatically: confirm it with +20. Frame gaps, unexplained foreground, missing pucks and near-line positions hold the score for review.
 - Local video import, synthetic demo, auto scoreboard with manual corrections, round history, undo and JSON match-log export.
-- Match scores persist in this browser. Clips and review notes remain in this tab until exported; there is no server storage.
+- Match scores persist in this browser. Completed clips and review notes are saved to local IndexedDB when available; failed saves remain in-tab and are labelled. There is no server storage. Export a match ZIP as a backup.
 
 ## Hosting
 
@@ -43,11 +43,14 @@ Browser smoke tests use Playwright and a synthetic camera, **not physical-board 
 python -m pip install playwright==1.57.0
 python -m playwright install chromium
 python tests/browser_smoke.py
+python tests/teams_rounds_browser.py
+python tests/reliability_browser.py
+python tests/offline_replay_proof.py
 ```
 
 ## Explicit limitations
 
-No verified first-contact classification or automatic legal/foul decisions. Automatic shot segmentation, visible-board scoring and possible-20 review flags are implemented as assistance, but they remain unverified on the physical camera/board and can abstain when evidence is weak. Buffered clips include pre-trigger frames when the buffer is ready. Early shots can have a shorter lead-in, and unavailable/disabled buffering falls back to recording on motion. Pre-roll uses additional local video encoders; actual frame delivery and encoded lead-in must be checked on the physical computer. There is no permanent video library. Smart and manual perspective correction model the flat board only: occlusion, residual lens distortion and the height of pucks/pegs remain unresolved. Smart setup uses confidence gates and never silently applies its candidate; the user still confirms the overlay. Use the four physical quarter marks, not guessed extrema of the oval image. Fast shots, lighting changes and touching discs can defeat detection. Those gaps remain visible rather than becoming invented certainty.
+No verified first-contact classification or automatic legal/foul decisions. Automatic shot segmentation, visible-board scoring and possible-20 review flags are implemented as assistance, but they remain unverified on the physical camera/board and can abstain when evidence is weak. Buffered clips include pre-trigger frames when the buffer is ready. Early shots can have a shorter lead-in, and unavailable/disabled buffering falls back to recording on motion. Pre-roll uses additional local video encoders; actual frame delivery and encoded lead-in must be checked on the physical computer. Local clip storage is not an external backup and can be lost if site data is cleared or evicted. Smart and manual perspective correction model the flat board only: occlusion, residual lens distortion and the height of pucks/pegs remain unresolved. Smart setup uses confidence gates and never silently applies its candidate; the user still confirms the overlay. Use the four physical quarter marks, not guessed extrema of the oval image. Fast shots, lighting changes and touching discs can defeat detection. Those gaps remain visible rather than becoming invented certainty.
 
 ## Architecture and privacy
 
@@ -68,3 +71,13 @@ Set **Shots per team** once (default 12, configurable 1–12; WCC singles uses 8
 Ambiguous/missed launches, unexpected turns, camera interruptions, or mid-round reconnects hold completion. The exceptional **Correct an uncertain shot count** control records a player correction and requires score review. Team colours are not silently changed mid-round. Existing first-contact/foul limits, manual 20 confirmation, camera privacy and pre-roll remain unchanged.
 
 Format source: https://worldcrokinole.com/thegame.html (WCC: singles 8/player; doubles 6/player, 12/team). The app cannot see an off-board pile well enough to infer which allocation you chose.
+
+## Reliability, Play view and local evidence library
+
+See [the current reliability handoff](docs/RELIABILITY.md). Unknown puck-sized foreground now holds scoring even when no previous identity existed. Automatic colour teaching also measures the puck radius. Amber cluster outlines are **hypotheses for review**, not scored detections. Missing-track predictions never add points or confirm a collision.
+
+Play view puts the score, current state and shots remaining beside the board while preserving the original setup. Board-observation corrections reconcile with returning detections and expire on the next shot. Intentional signed adjustments and confirmed 20s remain separate. Format presets supply allocations and alternate the starting team.
+
+Completed clips and notes save in local IndexedDB when available; check their saved status. **Export match with clips** creates an offline ZIP with unmodified videos and exact replay fixtures. Nothing is uploaded. Browser storage can be cleared or evicted, so keep a ZIP backup. Up to 120 clips, 64MB each, 256MB total video bytes. The diagnostics button exports the matching empty-board image and recent observations locally for repeatable investigation.
+
+`tools/replay_video.py` runs saved video through the same geometry/detection/analyser modules at its decoded timestamps, and can compare independent labels. Unlabelled or synthetic success is not physical-camera accuracy. Real-camera benchmark recordings are still required.

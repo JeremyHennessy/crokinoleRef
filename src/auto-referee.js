@@ -108,9 +108,9 @@ export class AutoShotAnalyzer {
       }
       // A puck first observed already moving can trigger a clip after two matched observations.
       const movingEntry=!this.armed&&(this.entryPending||this.baselineStreak===1)&&previous.length>0&&topologyDisappeared===0;
-      if((this.armed||movingEntry)&&!frameGap&&!obstructed&&moving.length){this.motionFrames++;}else this.motionFrames=0;
+      if((this.armed||movingEntry||(obstructed&&previous.length>0&&matched.length===current.length))&&!frameGap&&moving.length){this.motionFrames++;}else this.motionFrames=0;
       if(this.motionFrames>=1){
-        this.active=true;this.armed=false;this.entryPending=false;this.shotNumber++;this.startedAt=time;this.stableSince=null;this.hadFrameGap=false;this.hadObstruction=false;this.contacts=[];
+        this.active=true;this.armed=false;this.entryPending=false;this.shotNumber++;this.startedAt=time;this.stableSince=null;this.hadFrameGap=false;this.hadObstruction=obstructed;this.contacts=[];
         this.tracks=new Map();const seed=previous.length>=this.lastSettled.length?previous:this.lastSettled;this.preDiscs=seed.map(cloneDisc);this._recordTracks(seed,time);this._recordTracks(current,time);
         event={type:'shot-start',shotNumber:this.shotNumber,time,movingDiscIds:moving,preDiscs:this.preDiscs.map(cloneDisc)};
       }

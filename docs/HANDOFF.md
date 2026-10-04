@@ -1,3 +1,13 @@
+# Current handoff — reliability, corrections, Play view and local library
+
+Release baseline `034bd85b3ff1a24eb0fd41804f5f64cfd88ab632`, tree `e3bd0a0d3d2e343b96a9c8acf6229f3d73e6973d`. Work is on `feature/reliability-play-library`. See `RELIABILITY.md` for source changes, regression evidence, offline replay instructions, storage limits and release gates.
+
+The reproduced never-tracked foreground/cluster issue is the first correction; unknown regions and cluster outlines must never be silently scored as empty. New tracking predictions do not create observed discs. The banked 20 / signed round ledger stays separate from board annotations, which expire or reconcile instead of double counting. Format/starting-team changes are explicit. Play view is optional and the original setup remains accessible. Completed videos/notes are saved locally only after IndexedDB transaction completion; failed writes keep the in-tab data. ZIP export includes original videos and private empty-board replay fixtures. Do not commit user footage or diagnostic image data publicly.
+
+No actual physical-game recording was found in the conversation/Library lookup. Real-camera accuracy is still unmeasured. Full browser proof and offline synthetic decode are CI gates, not substitutes for that benchmark. Temporary source transport workflows/files must be removed before release. Do not claim deployment from a commit or test pass: verify exact Pages build-info after merge.
+
+## Earlier handoff (historical, not current behavior)
+
 # Current handoff — automatic teams and round completion
 
 Baseline for this change: main `010cf2c6f1404cb2175d89949b7aca3fb06ee65e`, tree `2715e7f382e25b32c885fd0600cb09bc39fe046e`. This contains pre-shot buffering; do not replace it with older unbuffered code. New work is isolated to `feature/automatic-teams-rounds`. This is not a user-approved visual checkpoint.

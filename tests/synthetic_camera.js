@@ -18,6 +18,15 @@
     fixture.roundPucks.push({team,...start,target:{x:team===0?600:360,y:n===0?320:400}});
     fixture.mode='round-play';
   };
+  fixture.fullAllocation=8;
+  fixture.fullStarter=0;
+  fixture.placeFullPuck=team=>{
+    const n=fixture.roundPucks.length,angle=n*Math.PI/fixture.fullAllocation;
+    const radius=fixture.fullAllocation===8?135:210;
+    fixture.roundPucks.push({team,x:480+Math.cos(angle)*242,y:360+Math.sin(angle)*242,target:{x:480+Math.cos(angle)*radius,y:360+Math.sin(angle)*radius}});
+    fixture.mode='round-play';
+  };
+  fixture.clearRound=()=>{fixture.roundPucks=[];fixture.roundMove=null;fixture.mode='round-play';};
   fixture.flickRoundPuck=()=>{fixture.roundMove={index:fixture.roundPucks.length-1,start:performance.now(),from:{...fixture.roundPucks.at(-1)}};};
   const draw=()=>{
     ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='#223e35';ctx.fillRect(0,0,960,720);
