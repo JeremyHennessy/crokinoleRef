@@ -51,6 +51,28 @@ jobs:
             test-results/offline-proof/**
           if-no-files-found: ignore
           retention-days: 7
+  capture-timing:
+    name: Capture timing and explicit recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated browser
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Compare capture paths and force a real scheduling interruption
+        run: python tests/capture_timing_browser.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: capture-timing-evidence
+          path: test-results/capture-timing-report.json
+          if-no-files-found: error
+          retention-days: 7
   cache-upgrade:
     name: Returning-browser cache upgrade
     runs-on: ubuntu-latest
@@ -83,7 +105,7 @@ jobs:
   deploy:
     name: Publish GitHub Pages
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: [test, cache-upgrade]
+    needs: [test, cache-upgrade, capture-timing]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

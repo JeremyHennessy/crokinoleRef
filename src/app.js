@@ -7,9 +7,10 @@ import { RollingClipBuffer, createCapture } from './clip-buffer.js';
 import { installGameAutomation } from './game-automation.js';
 import { installReviewControls } from './review-controls.js';
 import { invalidateBoardCorrections, validBoardCorrections } from './board-corrections.js';
-import { DiagnosticLog, diagnosticJSON } from './diagnostics.js';
+import { DiagnosticLog, diagnosticJSON } from './diagnostics.js?workspace=1';
 import { installLibraryControls } from './library-controls.js';
-import { FullRoundDemo } from './full-round-demo.js';
+import { FullRoundDemo } from './full-round-demo.js?physics=1';
+import { DEMO_BOARD } from './demo-physics.js?physics=1';
 const $ = id => document.getElementById(id);
 const board = $('board'), ctx = board.getContext('2d');
 const video = $('source-video'), raw = document.createElement('canvas'), rawCtx = raw.getContext('2d', { willReadFrequently: true });
@@ -54,7 +55,7 @@ const guide = new CalibrationGuide({
 });
 let worker;
 try {
-  worker = new Worker(new URL('./vision-worker.js?reliability=1', import.meta.url), { type: 'module' });
+  worker = new Worker(new URL('./vision-worker.js?workspace=1', import.meta.url), { type: 'module' });
   worker.onmessage = ({ data: m }) => {
     if (m.generation !== state.generation) return;
     state.inflight = false;
@@ -383,13 +384,13 @@ function sampleTeam(team) {
   $('stage-hint').textContent = `Click the solid centre of a TEAM ${team === 0 ? 'A' : 'B'} disc. View frozen.`; updateControls();
 }
 function circle(x, y, r, fill, stroke = null) { rawCtx.beginPath(); rawCtx.arc(x, y, r, 0, Math.PI * 2); rawCtx.fillStyle = fill; rawCtx.fill(); if (stroke) { rawCtx.strokeStyle = stroke; rawCtx.lineWidth = 2; rawCtx.stroke(); } }
-function paintDemo(t, empty = false) {
+function paintDemo(t, empty = false, physical = false) {
   rawCtx.fillStyle = '#223e35'; rawCtx.fillRect(0, 0, 960, 720);
-  circle(480, 360, 325, '#102a25'); circle(480, 360, 309, '#a78052'); circle(480, 360, 294, '#2d2922'); circle(480, 360, 280, '#dfc594', '#705939');
+  circle(480, 360, 325, '#102a25'); circle(480, 360, physical?323:309, '#a78052'); circle(480, 360, physical?DEMO_BOARD.railRadius:294, '#2d2922'); circle(480, 360, DEMO_BOARD.radius, '#dfc594', '#705939');
   for (const r of [260, 185, 94]) circle(480, 360, r, '#dfc594', '#4a3929');
   rawCtx.strokeStyle = '#705939'; rawCtx.lineWidth = 2;
   for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2; rawCtx.beginPath(); rawCtx.moveTo(480 + 250 * Math.cos(a), 360 + 250 * Math.sin(a)); rawCtx.lineTo(480 + 260 * Math.cos(a), 360 + 260 * Math.sin(a)); rawCtx.stroke(); }
-  for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; circle(480 + Math.cos(a) * 94, 360 + Math.sin(a) * 94, 5, '#4a3929'); }
+  for(const peg of DEMO_BOARD.pegs)circle(peg.x,peg.y,peg.r,'#4a3929');
   circle(480, 360, 17, '#483927'); circle(480, 360, 12, '#302c22');
   rawCtx.fillStyle = '#886d48'; rawCtx.font = '16px Georgia'; rawCtx.textAlign = 'center'; rawCtx.fillText('5', 690, 363); rawCtx.fillText('10', 620, 363); rawCtx.fillText('15', 545, 363);
   if (empty) return;
@@ -397,6 +398,26 @@ function paintDemo(t, empty = false) {
   const s = Math.min(t, 6.9), moving = clamp(s - 1, 0, 0.6), hit = clamp(s - 1.6, 0, 0.55);
   circle(480, 572 - moving * 240, 14, `rgb(${a})`); circle(480, 400 - hit * 200, 14, `rgb(${b})`);
   circle(620, 290, 14, `rgb(${a})`); circle(340, 410, 14, `rgb(${b})`);
+}
+function paintPhysicsDemo(discs, contacts=[]) {
+  paintDemo(0,true,true);
+  for(const d of discs){
+    rawCtx.save();
+    if(d.out){
+      // The lower gutter is occluded by the tabletop; never paint a fallen
+      // disc bouncing back over the playing surface at the same height.
+      rawCtx.beginPath();rawCtx.rect(0,0,raw.width,raw.height);
+      rawCtx.arc(DEMO_BOARD.x,DEMO_BOARD.y,DEMO_BOARD.radius,0,Math.PI*2);
+      rawCtx.clip('evenodd');rawCtx.globalAlpha=.8;
+    }else rawCtx.globalAlpha=d.opacity??1;
+    const radius=d.pocketed?d.r*Math.max(.1,d.opacity??1):d.r;
+    circle(d.x,d.y,radius,`rgb(${state.colors[d.team]})`);
+    rawCtx.restore();
+  }
+  const scale=small.width/board.width;
+  state.discs=discs.filter(d=>!d.out&&!d.pocketed).map(d=>({...d,x:d.x*scale,y:d.y*scale,r:d.r*scale}));
+  $('disc-count').textContent=String(state.discs.length);
+  $('contact-status').textContent=contacts.length?'Simulated contact: '+contacts.map(e=>e.type==='peg'?'peg deflection':'disc-to-disc impact').join(' · '):'Demo physics only · live contact/referee decisions are unchanged.';
 }
 function startDemo(fullRound = false) {
   if (!stopSource()) return;
@@ -407,7 +428,7 @@ function startDemo(fullRound = false) {
   $('welcome').hidden = true; $('demo-label').hidden = false; $('source-badge').textContent = 'DEMO · simulated board'; $('reported-fps').textContent = 'Synthetic';
   $('stage-hint').textContent = 'Synthetic motion through the same detector. This does not validate real-camera accuracy.';
   configureWorker();
-  if(fullRound){fullDemo.start();$('source-badge').textContent='DEMO · full scripted round';$('stage-hint').textContent='Scripted exhibition: score and 20s come from the simulation, not camera verdicts.';notify('Full-round demo only. No camera, recording, or changes to your saved match.');return;}
+  if(fullRound){fullDemo.start();$('source-badge').textContent='DEMO · simulated physics round';$('stage-hint').textContent='Physics exhibition: trajectories and scores follow simulated impacts, not fixed outcomes or camera verdicts.';notify('Full-round demo only. No camera, recording, or changes to your saved match.');return;}
   const token = state.token;
   const tick = now => { if (state.mode !== 'demo' || token !== state.token) return; if (!state.calibrationPoints && state.sampleTeam === null) paintDemo((now - state.demoStart) / 1000); processFrame((now - state.demoStart) / 1000, now); state.raf = requestAnimationFrame(tick); };
   state.raf = requestAnimationFrame(tick); notify('Demo only: synthetic discs, synthetic motion. Your manual match scores are unchanged.');
@@ -630,5 +651,5 @@ window.addEventListener('beforeunload', e => { if (library?.hasUnsaved() || stat
 window.addEventListener('pagehide', () => { clipBuffer.stop(); state.stream?.getTracks().forEach(t => t.stop()); });
 game=installGameAutomation({state,getCalibration:analysisCalibration,readyToTrack,reconfigure:configureWorker,updateControls,saveMatch,finishRound,notify});
 reviewControls=installReviewControls({state,board,getCalibration:analysisCalibration,toAnalysis:p=>state.projection?projectPoint(state.projection.imageToBoard,p):{x:p.x*small.width/board.width,y:p.y*small.width/board.width},snapshotScore,saveMatch,renderScore,notify});
-fullDemo=new FullRoundDemo({state,processFrame,renderScore,exit:stopSource,paint:discs=>{paintDemo(0,true);for(const d of discs){rawCtx.save();rawCtx.globalAlpha=d.opacity??1;circle(d.x,d.y,d.r,`rgb(${state.colors[d.team]})`);rawCtx.restore();}}});
+fullDemo=new FullRoundDemo({state,processFrame:time=>{state.time=time;ctx.drawImage(raw,0,0);drawOverlay();},renderScore,exit:stopSource,paint:paintPhysicsDemo});
 loadMatch();renderScore();library=installLibraryControls({state,renderClips,updateControls,payload:sessionPayload,download,notify});updateControls();listCameras();

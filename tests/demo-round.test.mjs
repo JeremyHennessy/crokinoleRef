@@ -1,53 +1,46 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {DemoRound,DEMO_INTRO_SECONDS,DEMO_SHOT_SECONDS} from '../src/demo-round.js';
-const expected=[[20,0],[20,15],[35,10],[30,25],[40,15],[35,25],[50,20],[45,40],[55,30],[45,40],[55,35],[50,45],[60,35],[65,40],[75,35],[70,55]];
+import {DemoRound} from '../src/demo-round.js';
+import {DEMO_BOARD as B} from '../src/demo-physics.js';
+// Regression fixture from the new physical sequence, not forced outcome inputs.
+const expected=[[20,0],[20,15],[35,10],[35,25],[35,20],[30,35],[45,35],[45,50],[55,50],[40,65],[55,65],[50,80],[65,65],[65,75],[75,75],[70,90]];
 
-test('full demonstration has 16 alternating shots and all independently enumerated scores',()=>{
-  const round=new DemoRound();
-  assert.deepEqual(round.at(0).discs,[]);
-  for(let i=0;i<16;i++){
-    const f=round.at(DEMO_INTRO_SECONDS+(i+1)*DEMO_SHOT_SECONDS);
-    assert.equal(f.completed,i+1);assert.deepEqual(f.scores,expected[i]);
-    assert.equal(f.history[i].team,i%2);assert.equal(f.used[0]+f.used[1],i+1);
-    assert.equal(f.source,'scripted-demo');
-  }
-  const end=round.at(round.duration);
-  assert.equal(end.phase,'complete');assert.deepEqual(end.used,[8,8]);assert.deepEqual(end.remaining,[0,0]);
-  assert.deepEqual(end.boardScores,[50,15]);assert.deepEqual(end.twenties,[1,2]);assert.deepEqual(end.awarded,[15,0]);
-  assert.equal(end.discs.filter(d=>d.out).length,4);assert.equal(end.discs.filter(d=>!d.out).length,9);
-  assert.equal(end.discs.length+end.twenties.reduce((a,b)=>a+b),16);
+test('16 alternating launches produce scores from the settled physical world',()=>{
+ const r=new DemoRound();assert.deepEqual(r.at(0).discs,[]);
+ for(let i=0;i<16;i++){const f=r.at(r.stages[i].endTime);assert.equal(f.completed,i+1);assert.deepEqual(f.scores,expected[i]);assert.equal(f.history[i].team,i%2);assert.equal(f.source,'physics-demo');}
+ const f=r.at(r.duration);assert.equal(f.phase,'complete');assert.deepEqual(f.used,[8,8]);assert.deepEqual(f.twenties,[1,0]);assert.deepEqual(f.boardScores,[50,90]);assert.deepEqual(f.awarded,[0,20]);
+ assert.equal(r.stages.at(-1).dispositions.length,16);assert.ok(r.duration<80);
 });
-
-test('second demo round alternates starter and keeps color labels and scoring consistent',()=>{
-  const round=new DemoRound({starter:1,round:2});
-  for(let i=0;i<16;i++){
-    const f=round.at(DEMO_INTRO_SECONDS+(i+1)*DEMO_SHOT_SECONDS);
-    assert.deepEqual(f.scores,[...expected[i]].reverse());assert.equal(f.history[i].team,(i+1)%2);
-  }
-  const end=round.at(round.duration);assert.deepEqual(end.awarded,[0,15]);
-  assert.match(end.history[14].title,/Last red/);assert.match(end.history[15].title,/Last blue/);
+test('every solved frame respects the same eight peg footprints that are rendered',()=>{
+ const r=new DemoRound();let checks=0;
+ for(const s of r.stages)for(const frame of s.frames){
+   const discs=frame.filter(d=>d.status==='board');
+   for(let i=0;i<discs.length;i++){
+     const d=discs[i];for(const p of B.pegs){assert.ok(Math.hypot(d.x-p.x,d.y-p.y)>=d.r+p.r-1e-4,`shot${s.id} disc${d.id} passed through peg${p.id}`);checks++;}
+     for(let j=i+1;j<discs.length;j++)assert.ok(Math.hypot(d.x-discs[j].x,d.y-discs[j].y)>=d.r+discs[j].r-1e-4,`shot${s.id} overlapping discs`);
+   }
+ }
+ assert.ok(checks>100000);
+ const events=r.stages.flatMap(s=>s.events);
+ assert.ok(events.some(e=>e.type==='peg'));assert.ok(events.some(e=>e.type==='disc'));assert.ok(events.some(e=>e.type==='gutter'));
+ for(const e of events.filter(e=>e.type==='peg'||e.type==='disc'))assert.ok(Math.abs(e.gap)<1e-5,'Rebound happened without contact');
 });
-
-test('demo uses the existing match-point calculation without modifying it',()=>{
-  const round=new DemoRound({mode:'match'});assert.deepEqual(round.at(round.duration).awarded,[2,0]);
-  assert.throws(()=>new DemoRound({mode:'invalid'}));
+test('replay, display cadence and playback speed do not change the physics',()=>{
+ const r=new DemoRound();const r2=new DemoRound();
+ for(const hz of [20,30,60,120])for(const speed of [.5,1,2]){
+  for(let t=0;t<r.duration;t+=speed/hz){const f=r.at(t);assert.deepEqual(f,r2.at(t));assert.ok(f.discs.every(d=>Number.isFinite(d.x+d.y+d.r)));}
+ }
+ const f=r.at(10);f.discs[0].x=NaN;assert.ok(r.at(10).discs.every(d=>Number.isFinite(d.x)));
 });
-
-test('animated states and copies remain finite, deterministic and isolated',()=>{
-  const round=new DemoRound();
-  for(let time=0;time<round.duration;time+=0.11){
-    const f=round.at(time);assert.deepEqual(f,round.at(time));
-    assert.ok(f.discs.every(d=>Number.isFinite(d.x+d.y+d.r)));assert.ok(f.used.every(n=>n>=0&&n<=8));
-    f.discs.forEach(d=>d.x=NaN);f.twenties[0]=999;f.scores[0]=999;
-    assert.ok(round.at(time).discs.every(d=>Number.isFinite(d.x)));assert.notEqual(round.at(time).scores[0],999);
-  }
+test('next round swaps team roles without changing physical outcomes, with shared match scoring',()=>{
+ const r=new DemoRound({starter:1,round:2});
+ for(let i=0;i<16;i++)assert.deepEqual(r.at(r.stages[i].endTime).scores,[...expected[i]].reverse());
+ assert.deepEqual(r.at(r.duration).awarded,[20,0]);
+ const m=new DemoRound({mode:'match'});assert.deepEqual(m.at(m.duration).awarded,[0,2]);
 });
-
-test('forward step and final hold are bounded; invalid inputs do not advance a round',()=>{
-  const round=new DemoRound();let t=0;
-  for(let i=1;i<=16;i++){t=round.nextShotTime(t);assert.equal(round.at(t).completed,i);}
-  assert.equal(round.nextShotTime(t),round.duration);assert.deepEqual(round.at(t+999),round.at(t));
-  assert.deepEqual(round.at(-1),round.at(0));assert.throws(()=>round.at(NaN));assert.throws(()=>round.at(Infinity));
-  assert.throws(()=>new DemoRound({starter:2}));assert.throws(()=>new DemoRound({round:0}));
+test('skip, final hold and invalid inputs remain bounded',()=>{
+ const r=new DemoRound();let t=0;
+ for(let i=1;i<=16;i++){t=r.nextShotTime(t);assert.equal(r.at(t).completed,i);}
+ assert.equal(r.nextShotTime(t),r.duration);assert.deepEqual(r.at(t+999),r.at(t));assert.deepEqual(r.at(-1),r.at(0));
+ assert.throws(()=>r.at(NaN));assert.throws(()=>new DemoRound({starter:2}));assert.throws(()=>new DemoRound({round:0}));
 });

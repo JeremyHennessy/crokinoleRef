@@ -2,11 +2,15 @@
 
 ## Watch a full demo round
 
-Press **Watch a full round** on the board's welcome screen. No camera, permission prompt or calibration is needed. A scripted exhibition plays 16 alternating shots (eight per team) in about 68 seconds at normal speed, with draws, bumps, takeouts into the gutter and three banked 20s. The board is animated; the demo score, remaining shots, point ledger and shot log advance after each shot. It stops at the completed round instead of starting over silently.
+Press **Watch a full round**. No camera, calibration or recording is needed. Sixteen alternating launch choices (eight per team) feed a demo-only two-dimensional physics model. The launch specifies position, direction and speed; it does not prescribe a destination, victim movement, final score or 20.
 
-**Pause / Resume**, **½× / 1× / 2× speed**, **Skip to next shot** and **Replay round** control only the synthetic animation. **Next demo round** alternates the starting team. The round award uses the selected Difference or Match points mode. **Exit demo** restores the original match scores, names and layout. The demonstration never records clips or writes its scores to your saved match or clip library. Hiding the tab pauses the demo; Resume continues it. The original **quick demo** is still available for the short detector-driven example.
+The visible eight pegs are the same circle geometry used by the collision solver. Swept collisions deflect a puck at the point of contact, equal-mass disc collisions exchange momentum, friction slows the pucks, and the actual playing-surface edge drops a disc into the lower gutter. The scoring circles are not bounce walls. A slow, fully centred hole entry is captured in the model; a miss or fast pass does not receive an invented 20. The simplified model has no spin, flex, or measured coefficients from your physical board and is not a legal-shot tutorial or camera-accuracy test.
 
-This is an illustrative script, not a physics model or proof of legal shots, contact order, automatic 20 detection, or camera accuracy. Its 20s and shot count are supplied by the script. Real games retain the existing evidence checks and manual 20 confirmation.
+**Pause / Resume**, **½× / 1× / 2×**, **Skip to next shot**, **Replay round** and **Next demo round** remain available. Physics uses a fixed 240 Hz step independently of playback speed; frames are replayed from the solved simulation, not interpolated through obstacles. The round takes roughly 54 seconds at 1×, ends at 70–90 for the first starting team, and holds for review. Replaying reproduces the same launches; the next round swaps the team roles. Scores and the award come from the simulated resting board and captured 20s, using the selected score mode.
+
+After all simulated motion stops, the demo checks the opponent-contact or play-to-middle requirement. Invalid shots remove the shooter and the other involved own-colour discs, including any invalid 20. A stopped disc touching the outer line is lifted out before the next launch; this is shown as a labelled fade, not a physical bounce. These rules use exact simulation events and do **not** enable automatic live-camera foul decisions. Rules source: [World Crokinole Championship](https://www.worldcrokinole.com/thegame.html).
+
+The original **quick demo** is a separate short detector fixture, not the physical round. **Exit demo** restores the live match, names and layout. No demo results or clips are saved over your live match/library. Hiding the tab pauses playback until Resume. Existing live 20 confirmation and uncertainty checks remain unchanged.
 
 ## Automatic setup and normal play
 
