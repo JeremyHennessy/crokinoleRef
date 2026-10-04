@@ -41,12 +41,12 @@ export function findColourPucks(pixels, background, width, height, c) {
     channels.forEach(a=>a.sort((u,v)=>u-v));
     if(channels.some(a=>a[Math.floor(a.length*.9)]-a[Math.floor(a.length*.1)]>48))continue;
     const color=channels.map(a=>a[Math.floor(a.length/2)]);
-    found.push({x,y,r,color});
+    found.push({x,y,r:Math.sqrt(area/Math.PI),color,measuredRadius:Math.sqrt(area/Math.PI),edgeRadius:(bw+bh)/4,shapeFill:area/(bw*bh)});
   }
   return found.slice(0,24);
 }
 export class TeamColourLearner {
-  constructor(known=[null,null]) { this.known=known.map(c=>c?[...c]:null);this.previous=null;this.since=null;this.frames=0;this.lastTime=null; }
+  constructor(known=[null,null]) { this.known=known.map(c=>c?[...c]:null);this.previous=null;this.since=null;this.frames=0;this.lastTime=null;this.radiusSamples=[]; }
   update(candidates,time) {
     if(this.known.every(Boolean))return {colors:this.known,status:'locked'};
     const groups=[];
@@ -60,9 +60,14 @@ export class TeamColourLearner {
       if(options[0].i!==index)pair.reverse();
     }
     const stable=this.previous&&time>this.lastTime&&time-this.lastTime<=.4&&pair.every((p,i)=>distance(p,this.previous[i])<p.r*.5&&colourDistance(p.color,this.previous[i].color)<24);
-    if(!stable){this.since=time;this.frames=1;}else this.frames++;
+    if(!stable){this.since=time;this.frames=1;this.radiusSamples=[];}else this.frames++;
+    for(const p of pair)if(Number.isFinite(p.measuredRadius))this.radiusSamples.push(p.measuredRadius);
+    this.radiusSamples=this.radiusSamples.slice(-30);
     this.previous=pair;this.lastTime=time;
-    if(this.frames>=5&&time-this.since>=.55){this.known=pair.map((p,i)=>this.known[i]||p.color);return {colors:this.known,status:'Team colours detected and locked. Clear the setup pucks to start the round.'};}
+    if(this.frames>=5&&time-this.since>=.55){this.known=pair.map((p,i)=>this.known[i]||p.color);const sizes=[...this.radiusSamples].sort((a,b)=>a-b),radius=sizes[Math.floor(sizes.length/2)];
+      const spread=sizes.length?sizes.at(-1)-sizes[0]:Infinity;
+      const measurement=sizes.length>=10&&spread<radius*.18?{radius,uncertainty:Math.max(.75,spread/2),samples:sizes.length,source:'stationary-puck-pixel-area'}:null;
+      return {colors:this.known,measurement,status:'Team colours detected and locked. Clear the setup pucks to start the round.'};}
     return {colors:null,status:'Two puck colours found · checking that they stay still…'};
   }
 }

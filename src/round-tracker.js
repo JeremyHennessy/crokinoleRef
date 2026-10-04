@@ -15,16 +15,16 @@ function introduced(baseline,current) {
   return current.filter((d,i)=>!used.has(i));
 }
 export class RoundTracker {
-  constructor(shotsPerTeam=12){this.reset(shotsPerTeam);}
-  reset(shotsPerTeam=this.limit) {
+  constructor(shotsPerTeam=12,starter=null){this.reset(shotsPerTeam,starter);}
+  reset(shotsPerTeam=this.limit,starter=null) {
     if(!Number.isInteger(shotsPerTeam)||shotsPerTeam<1||shotsPerTeam>12)throw Error('Choose 1–12 shots per team.');
-    this.limit=shotsPerTeam;this.used=[0,0];this.nextTeam=null;this.ready=false;this.hold='';this.emptySince=null;this.emptyFrames=0;
+    this.limit=shotsPerTeam;this.used=[0,0];this.starter=starter===0||starter===1?starter:null;this.nextTeam=this.starter;this.ready=false;this.hold='';this.emptySince=null;this.emptyFrames=0;
     this.baseline=[];this.candidate=null;this.active=null;this.lastTime=null;this.lastEvent=null;this.records=[];
   }
-  snapshot(){return {shotsPerTeam:this.limit,used:[...this.used],nextTeam:this.nextTeam,ready:this.ready,hold:this.hold,records:this.records.map(r=>({...r}))};}
+  snapshot(){return {shotsPerTeam:this.limit,used:[...this.used],starter:this.starter,nextTeam:this.nextTeam,ready:this.ready,hold:this.hold,records:this.records.map(r=>({...r}))};}
   restore(s) {
     if(!s)return;
-    this.reset(s.shotsPerTeam);
+    this.reset(s.shotsPerTeam,s.starter);
     if(!Array.isArray(s.used)||s.used.length!==2||s.used.some(v=>!Number.isInteger(v)||v<0||v>this.limit))throw Error('Invalid shots remaining.');
     this.used=[...s.used];this.nextTeam=s.nextTeam===0||s.nextTeam===1?s.nextTeam:null;
     this.records=Array.isArray(s.records)?s.records.slice(-24):[];
@@ -38,7 +38,7 @@ export class RoundTracker {
     if(!Array.isArray(remaining)||remaining.length!==2||remaining.some(v=>!Number.isInteger(v)||v<0||v>this.limit))throw Error('Remaining shots must be between zero and the round allocation.');
     const used=remaining.map(v=>this.limit-v);
     if(Math.abs(used[0]-used[1])>1)throw Error('Alternating teams cannot differ by more than one completed shot.');
-    this.used=used;this.nextTeam=used[0]===used[1]?null:used[0]>used[1]?1:0;
+    this.used=used;this.nextTeam=used[0]===used[1]?this.starter:used[0]>used[1]?1:0;
     this.ready=true;this.hold='';this.baseline=discs.map(clone);this.candidate=null;
     this.lastTime=null;this.lastEvent=null; // A verified correction starts a fresh camera/count continuity interval.
     this.records.push({source:'player-count-correction',used:[...used]});
@@ -46,7 +46,7 @@ export class RoundTracker {
   }
   status() {
     const remaining=this.used.map(v=>this.limit-v);
-    return {shotsPerTeam:this.limit,used:[...this.used],remaining,ready:this.ready,hold:this.hold,
+    return {shotsPerTeam:this.limit,used:[...this.used],remaining,starter:this.starter,nextTeam:this.nextTeam,ready:this.ready,hold:this.hold,
       complete:this.ready&&!this.hold&&remaining.every(v=>v===0)&&!this.active,
       active:!!this.active};
   }
@@ -87,7 +87,7 @@ export class RoundTracker {
       if(!a||!p||!a.inward||a.uncertain){this.hold='Shooting puck was not observed clearly. Verify shots remaining.';}
       else if(this.nextTeam!==null&&p.team!==this.nextTeam){this.hold='Turn sequence disagrees with the count. Verify shots remaining.';}
       else if(this.used[p.team]>=this.limit){this.hold='Extra shot beyond the round allocation. Verify shots remaining.';}
-      else {this.used[p.team]++;this.nextTeam=1-p.team;this.records.push({source:'observed-edge-launch',team:p.team,shot:event.shotNumber,time});}
+      else {if(this.starter===null)this.starter=p.team;this.used[p.team]++;this.nextTeam=1-p.team;this.records.push({source:'observed-edge-launch',team:p.team,shot:event.shotNumber,time});}
       this.active=null;this.candidate=null;this.baseline=(event.postDiscs||discs).map(clone);
     }
     return this.status();

@@ -1,4 +1,4 @@
-import { detectDiscs, Tracker } from './core.js';
+import { detectDiscEvidence, Tracker } from './core.js';
 import { createWarpMap, warpPixels } from './perspective.js';
 import { AutoShotAnalyzer } from './auto-referee.js';
 import { assessVisibility } from './visibility.js';
@@ -40,13 +40,15 @@ self.onmessage = ({ data: m }) => {
         const visible=assessVisibility(pixels,background,width,height,calibration,candidates);
         learned=learner.update(visible.viewObstructed?[]:candidates,m.time);
       }
-      if(learned.colors){colors=learned.colors;tracker.reset();referee.resetRound();}
+      if(learned.colors){colors=learned.colors;if(learned.measurement){calibration={...calibration,discRadius:learned.measurement.radius,radiusUncertainty:learned.measurement.uncertainty,radiusSource:learned.measurement.source};referee.setCalibration(calibration);}tracker.reset();referee.resetRound();}
       self.postMessage({type:'colours',generation,...learned});return;
     }
-    const detections = detectDiscs(pixels, background, width, height, calibration, colors, tolerance);
+    const evidence = detectDiscEvidence(pixels, background, width, height, calibration, colors, tolerance);
+    const detections=evidence.discs;
     const tracking = tracker.update(detections, m.time);
     const visibility = assessVisibility(pixels, background, width, height, calibration, tracking.discs);
+    if(evidence.unresolved.length)visibility.viewObstructed=true;
     const auto = referee.update({...tracking,...visibility}, m.time);
-    self.postMessage({ type: 'result', generation, time: m.time, ...tracking, auto, visibility });
+    self.postMessage({ type: 'result', generation, time: m.time, ...tracking, auto, visibility, detectionEvidence:{unresolved:evidence.unresolved,clusterCandidates:evidence.clusterCandidates} });
   } catch (error) { self.postMessage({ type: 'error', generation, message: error.message }); }
 };
