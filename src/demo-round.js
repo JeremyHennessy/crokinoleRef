@@ -1,92 +1,96 @@
 import { clamp, roundResult } from './core.js';
 import { scoreSettledBoard } from './auto-referee.js';
+import { DEMO_BOARD as B, DemoPhysics, PHYSICS_STEP, circleImpactTime } from './demo-physics.js?physics=1';
 
-/** An illustrative, deterministic exhibition, NOT a physics or legal-shot model.
- * The script supplies known outcomes, including 20s. It never trains or certifies
- * the camera detector. Coordinates match the existing 960 x 720 demo board. */
-export const DEMO_CALIBRATION = Object.freeze({
-  center: Object.freeze({x:480,y:360}), rings:Object.freeze([94,185,260]),
-  discRadius:14, width:960, height:720
-});
-export const DEMO_INTRO_SECONDS=1.2, DEMO_SHOT_SECONDS=4.2, DEMO_SHOTS=16;
-const script=[
-  {title:'Opening 20',to:[0,0],twenty:true},
-  {title:'Draw into the 15',to:[-40,-30]},
-  {title:'Bump the opposing disc out of the 15',to:[-40,-26],hit:2,move:[-115,-100]},
-  {title:'Return bump into the 10',to:[-40,-30],hit:3,move:[60,110]},
-  {title:'Takeout into the gutter',to:[-115,-100],hit:2,move:[-205,-215],out:true},
-  {title:'Push an opposing disc into the 5',to:[60,110],hit:3,move:[140,155]},
-  {title:'Take the inside position',to:[-40,-30],hit:4,move:[30,-130]},
-  {title:'Illustrative carom and banked 20',to:[0,0],hit:7,move:[-115,70],twenty:true},
-  {title:'Clear the right-hand disc',to:[60,110],hit:6,move:[100,285],out:true},
-  {title:'Answer with a left-side takeout',to:[-115,-100],hit:5,move:[-270,-120],out:true},
-  {title:'Bump an opponent toward the outer ring',to:[-115,-100],hit:10,move:[-190,-130]},
-  {title:'Move an opposing disc from 10 to 5',to:[60,110],hit:9,move:[180,120]},
-  {title:'Remove the far-side opposing disc',to:[30,-130],hit:4,move:[65,-295],out:true},
-  {title:'A costly bump gives the opponent 15',to:[-145,-130],hit:11,move:[-55,-40]},
-  {title:'Last blue shot: reduce the opposing score',to:[50,140],hit:12,move:[70,210]},
-  {title:'Last red shot: an illustrative carom 20',to:[0,0],hit:13,move:[110,-160],twenty:true}
-];
-const point=([x,y])=>({x:480+x,y:360+y});
+/** Repeatable launch choices feed the demo-only physical world. No destinations,
+ * contact partners, final scores, removals, or 20s are assigned by a script. */
+export const DEMO_CALIBRATION=Object.freeze({center:Object.freeze({x:B.x,y:B.y}),rings:Object.freeze([94,185,260]),discRadius:B.puckRadius,width:960,height:720});
+export const DEMO_INTRO_SECONDS=1.2, DEMO_SHOTS=16;
+const LINEUP=.65, SETTLE=.65;
+const powers=[35,0,205,260,340,145,250,315,190,340,200,285,345,155,320,210];
+const cuts=[0,0,0,15,-12,8,-16,0,12,-8,0,17,-9,0,13,-15];
 const copy=ds=>ds.map(d=>({...d}));
-const lerp=(a,b,t)=>({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t});
-const ease=t=>1-(1-clamp(t,0,1))**2;
-
-export class DemoRound {
-  constructor({starter=0,round=1,mode='difference'}={}) {
-    if(![0,1].includes(starter)||!Number.isSafeInteger(round)||round<1)throw Error('Invalid demo round.');
-    roundResult(0,0,mode); // Validate the shared round-scoring mode.
-    this.starter=starter;this.round=round;this.mode=mode;
-    this.duration=DEMO_INTRO_SECONDS+DEMO_SHOTS*DEMO_SHOT_SECONDS;
-    this.stages=[];
-    let discs=[],twenties=[0,0],used=[0,0];
-    script.forEach((shot,i)=>{
-      const team=(i+starter)%2,id=i+1,before=copy(discs),target=before.find(d=>d.id===shot.hit);
-      if(shot.hit&&(!target||target.out||target.team===team))throw Error('Invalid scripted contact.');
-      const start={x:480+(team===starter?-36:36),y:360+(team===starter?242:-242)};
-      const end=point(shot.to);
-      const length=target?Math.hypot(start.x-target.x,start.y-target.y):1;
-      const contact=target?{x:target.x+(start.x-target.x)*28/length,y:target.y+(start.y-target.y)*28/length}:end;
-      const shooter={id,team,...start,r:14};
-      if(target)discs=discs.map(d=>d.id===target.id?{...d,...point(shot.move),out:!!shot.out}:d);
-      if(shot.twenty)twenties[team]++;else discs.push({...shooter,...end});
-      used[team]++;
-      const score=scoreSettledBoard(discs.filter(d=>!d.out),DEMO_CALIBRATION,twenties);
-      this.stages.push({id,team,title:shot.title.replace('blue',team===0?'blue':'red').replace('Last red',team===1?'Last red':'Last blue'),
-        before,after:copy(discs),shooter,contact,end,target:target?{...target}:null,
-        moved:target?discs.find(d=>d.id===target.id):null,twenty:!!shot.twenty,
-        twenties:[...twenties],used:[...used],score});
-    });
-  }
-  at(seconds) {
-    if(!Number.isFinite(seconds))throw Error('Demo time must be finite.');
-    const time=clamp(seconds,0,this.duration),play=Math.max(0,time-DEMO_INTRO_SECONDS);
-    const completed=Math.min(DEMO_SHOTS,Math.floor((play+1e-8)/DEMO_SHOT_SECONDS));
-    const previous=this.stages[completed-1],current=this.stages[completed];
-    const base={time,round:this.round,completed,used:previous?[...previous.used]:[0,0],
-      remaining:previous?previous.used.map(n=>8-n):[8,8],twenties:previous?[...previous.twenties]:[0,0],
-      scores:previous?[...previous.score.totals]:[0,0],boardScores:previous?[...previous.score.visible]:[0,0],
-      history:this.stages.slice(0,completed).map(s=>({shot:s.id,team:s.team,title:s.title,scores:[...s.score.totals],twenty:s.twenty})),
-      source:'scripted-demo',phase:'ready',team:current?.team??null,title:current?.title??'Round finished'};
-    if(completed===DEMO_SHOTS)return {...base,phase:'complete',discs:copy(previous.after),awarded:roundResult(...base.scores,this.mode)};
-    if(time<DEMO_INTRO_SECONDS)return {...base,discs:[],title:'Clear board · eight shots per team'};
-    const local=play-completed*DEMO_SHOT_SECONDS,ds=copy(current.before);
-    let shooter={...current.shooter};
-    if(local>=0.8){
-      base.phase=local<2.6?'shooting':'settling';
-      const approaching=local<1.5;
-      shooter={...shooter,...(approaching?lerp(current.shooter,current.contact,ease((local-0.8)/0.7)):lerp(current.contact,current.end,ease((local-1.5)/1.1)))};
-      if(!approaching&&current.target){
-        const victim=ds.find(d=>d.id===current.target.id);
-        Object.assign(victim,lerp(current.target,current.moved,ease((local-1.5)/1.1)));
-      }
-      if(current.twenty)shooter.opacity=clamp((2.6-local)/0.25,0,1);
+const boardDiscs=world=>world.discs.filter(d=>d.status==='board');
+function planLaunch(world,role,index){
+  const team=(role+world.starter)%2;
+  const opponents=boardDiscs(world).filter(d=>d.team!==team).sort((a,b)=>Math.hypot(a.x-B.x,a.y-B.y)-Math.hypot(b.x-B.x,b.y-B.y));
+  const targets=opponents.length?opponents:[{x:B.x+(index%3===1?-42:0),y:B.y+(index%3===1?-38:0),id:null}];
+  let best=null;
+  // Choose a clear starting placement/initial aim, not an animated way-point.
+  for(const target of targets)for(const offset of [22.5,-22.5,32,-32,10,-10,0,40,-40]){
+    const angle=(role===0?90:270)*Math.PI/180+offset*Math.PI/180;
+    const start={x:B.x+250*Math.cos(angle),y:B.y+250*Math.sin(angle),r:B.puckRadius};
+    if(boardDiscs(world).some(d=>Math.hypot(start.x-d.x,start.y-d.y)<start.r+d.r+1))continue;
+    const dx=target.x-start.x,dy=target.y-start.y,len=Math.hypot(dx,dy),cut=target.id===null?0:cuts[index];
+    const aim={x:target.x-dy/len*cut,y:target.y+dx/len*cut},dist=Math.hypot(aim.x-start.x,aim.y-start.y);
+    const ux=(aim.x-start.x)/dist,uy=(aim.y-start.y)/dist;
+    let first=null;
+    for(const p of [...B.pegs.map(p=>({...p,type:'peg'})),...boardDiscs(world).map(d=>({...d,type:'disc'}))]){
+      const time=circleImpactTime({...start,vx:ux,vy:uy},p,dist);
+      if(time!==null&&(!first||time<first.time))first={...p,time};
     }
-    if(!current.twenty||local<2.6)ds.push(shooter);
-    return {...base,discs:ds};
+    const wanted=target.id!==null?first?.type==='disc'&&first.id===target.id:!first;
+    const merit=(wanted?1000:0)-(first?.type==='disc'&&first.team===team?200:0)-dist*.05;
+    if(!best||merit>best.merit){
+      const stopDistance=target.id===null&&index%3===1?dist:Math.max(0,dist-(target.id===null?0:28));
+      const impact=target.id===null?(index%3===1?0:35):powers[index];
+      const velocity=Math.sqrt(2*world.friction*stopDistance+impact*impact);
+      best={...start,id:index+1,team,vx:ux*velocity,vy:uy*velocity,merit,intent:target.id===null?(index%3===1?'A controlled draw':'Aim through the peg gap'):'An aimed '+(cut?'glancing':'direct')+' hit'};
+    }
   }
-  nextShotTime(seconds){
-    const frame=this.at(seconds);
-    return Math.min(this.duration,DEMO_INTRO_SECONDS+(frame.completed+1)*DEMO_SHOT_SECONDS);
+  if(!best)throw Error('No unobstructed shooting position for this demo.');
+  return best;
+}
+function picture(world){
+  return world.snapshot().map(d=>({...d,opacity:d.pocketed?clamp(1-(world.time-d.enteredAt)/.22,0,1):1})).filter(d=>d.opacity>0);
+}
+function outcome(events,intent){
+  const parts=[];
+  const n=events.filter(e=>e.type==='disc').length,p=events.filter(e=>e.type==='peg').length;
+  if(n)parts.push(`${n} disc contact${n===1?'':'s'}`);
+  if(p)parts.push(`${p} peg deflection${p===1?'':'s'}`);
+  if(events.some(e=>e.type==='gutter'))parts.push('disc into the gutter');
+  if(events.some(e=>e.type==='hole'))parts.push('simulated 20');
+  return parts.join(' · ')||intent;
+}
+export class DemoRound {
+  constructor({starter=0,round=1,mode='difference'}={}){
+    if(![0,1].includes(starter)||!Number.isSafeInteger(round)||round<1)throw Error('Invalid demo round.');
+    roundResult(0,0,mode);this.starter=starter;this.round=round;this.mode=mode;this.stages=[];
+    const world=new DemoPhysics();world.starter=starter;
+    let timeline=DEMO_INTRO_SECONDS;const used=[0,0];
+    for(let i=0;i<DEMO_SHOTS;i++){
+      const launch=planLaunch(world,i%2,i),before=picture(world),eventIndex=world.events.length;
+      const startTime=timeline,simStart=world.time;
+      world.add(launch);
+      const lineup=[...before,{...launch,vx:0,vy:0,status:'board'}],frames=[picture(world)];
+      let steps=0;
+      do {world.step();frames.push(picture(world));if(++steps>8/PHYSICS_STEP)throw Error('Demo did not settle naturally.');} while(world.moving());
+      const motionTime=steps*PHYSICS_STEP;timeline+=LINEUP+motionTime+SETTLE;
+      const twenties=[0,0];world.discs.forEach(d=>{if(d.status==='hole')twenties[d.team]++;});
+      used[launch.team]++;
+      const events=world.events.slice(eventIndex).map(e=>({...e,time:e.time-simStart}));
+      const score=scoreSettledBoard(boardDiscs(world),DEMO_CALIBRATION,twenties);
+      this.stages.push({id:i+1,team:launch.team,startTime,endTime:timeline,motionTime,launch: {...launch},lineup,frames,after:picture(world),events,twenties:[...twenties],used:[...used],score,title:outcome(events,launch.intent),intent:launch.intent});
+    }
+    this.duration=timeline;
   }
+  at(seconds){
+    if(!Number.isFinite(seconds))throw Error('Demo time must be finite.');
+    const time=clamp(seconds,0,this.duration);
+    let completed=this.stages.findIndex(s=>time<s.endTime-1e-8);if(completed<0)completed=16;
+    const prev=this.stages[completed-1],current=this.stages[completed];
+    const base={time,round:this.round,completed,used:prev?[...prev.used]:[0,0],remaining:prev?prev.used.map(n=>8-n):[8,8],twenties:prev?[...prev.twenties]:[0,0],scores:prev?[...prev.score.totals]:[0,0],boardScores:prev?[...prev.score.visible]:[0,0],history:this.stages.slice(0,completed).map(s=>({shot:s.id,team:s.team,title:s.title,scores:[...s.score.totals],twenty:s.events.some(e=>e.type==='hole')})),source:'physics-demo',phase:'ready',team:current?.team??null,title:current?.intent??'Round finished',contacts:[]};
+    if(completed===16)return {...base,phase:'complete',discs:copy(prev.after),awarded:roundResult(...base.scores,this.mode)};
+    if(time<DEMO_INTRO_SECONDS)return {...base,discs:[],title:'Clear board · eight shots per team'};
+    const local=time-current.startTime;
+    if(local<LINEUP)return {...base,discs:copy(current.lineup)};
+    const t=local-LINEUP,index=Math.min(current.frames.length-1,Math.floor((t+1e-8)/PHYSICS_STEP));
+    const phase=t<current.motionTime?'shooting':'settling';
+    // Use solved fixed-step poses, never lerp a chord through a collision.
+    const ds=copy(current.frames[index]).filter(d=>!d.pocketed||t<current.motionTime);
+    const contacts=current.events.filter(e=>e.time<=t&&t-e.time<.16&&(e.type==='disc'||e.type==='peg')).map(e=>({...e}));
+    return {...base,phase,discs:ds,contacts,title:phase==='settling'?current.title:current.intent};
+  }
+  nextShotTime(seconds){const f=this.at(seconds);return this.stages[f.completed]?.endTime??this.duration;}
 }
