@@ -34,7 +34,7 @@ export function installGameAutomation({state, getCalibration, readyToTrack, reco
   function snapshot(){return {...counter.snapshot(),enabled:$('auto-rounds').checked};}
   function restore(s){
     if(!s)return;
-    try{counter.restore(s);$('round-allocation').value=String(counter.limit);$('auto-rounds').checked=s.enabled!==false;renderCounter();}catch{counter.reset(12);}
+    try{counter.restore(s);lastCompleted='';$('round-allocation').value=String(counter.limit);$('auto-rounds').checked=s.enabled!==false;renderCounter();}catch{counter.reset(12);}
   }
   function maybeFinish(m){
     const s=counter.status();
@@ -64,7 +64,7 @@ export function installGameAutomation({state, getCalibration, readyToTrack, reco
   return {
     snapshot,restore,renderPalette,
     onReconfigure(){if(state.mode==='idle'&&!counter.used.some(Boolean))counter.reset(readLimit());else counter.interrupt();renderCounter();},
-    resetRound(){counter.reset(readLimit());renderCounter();},
+    resetRound(){counter.reset(readLimit());lastCompleted='';renderCounter();},
     enterPreview(){preview=snapshot();counter=new RoundTracker(readLimit());renderCounter();},
     exitPreview(){if(preview){const saved=preview;preview=null;counter=new RoundTracker(saved.shotsPerTeam);counter.restore(saved);}renderCounter();},
     colours(m){
